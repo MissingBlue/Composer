@@ -73,16 +73,14 @@ export class Chr extends Escape {
 		
 		super(_, _x),
 		
-		this.__ = Object.getPrototypeOf(Object.getPrototypeOf(this)),
-		
 		this.setChr($);
 		
 	}
 	
-	setChrs($, _, _x) {
+	setup($, _, _x) {
 		
-		this.setValue($),
-		this.__.set(_, _x);
+		this.setChr($),
+		this.set(_, _x);
 		
 	}
 	setChr($) {
@@ -112,18 +110,18 @@ export class Chr extends Escape {
 	}
 	
 	// 第一引数 str でこのインスタンスのメソッド match を実行した結果から、
-	// 第二引数 outers に指定された任意の数の文字列範囲を示す位置情報の外側にあるもののみを絞り込んだ結果を含んだ Object を返す。
-	// 絞り込んだ結果は matched、そして outers の内側にあると判定された文字の位置情報は extracted に配列の要素として示される。
+	// 第二引数 maskIndices に指定された任意の数の文字列範囲を示す位置情報の外側にあるもののみを絞り込んだ結果を含んだ Object を返す。
+	// 絞り込んだ結果は matched、そして maskIndices の内側にあると判定された文字の位置情報は masked に配列の要素として示される。
 	// 第二引数に指定する値は、Brackets のメソッド locate の戻り値か、それに準じたものであることが求められる。
-	// これはプログラミングにおける文字列の判定を想定していて、outers の中にあるこのインスタンスの文字列は、
+	// これはプログラミングにおける文字列の判定を想定していて、maskIndices の中にあるこのインスタンスの文字列は、
 	// それ自体は意味を持たない別の文字列として除外することを目的としている。
-	// 例えば str が "a{a}" で、このインスタンスの文字列が a、outers が { } の位置を示す時、
+	// 例えば str が "a{a}" で、このインスタンスの文字列が a、maskIndices が { } の位置を示す時、
 	// このインスタンスの文字列位置として記録されるのは、一文字目だけの a になる。
-	// コード上では new Chr('a').extract('a{a}', { li: 2, r: 3 }); と指定する。（ここでは outers は必要最小限の指定）
-	// 戻り値は { matched: [ 0 ], extracted: [ 2 ] } である。
-	extract(str, ...outers) {
+	// コード上では new Chr('a').mask('a{a}', [ { li: 2, r: 3 } ]); と指定する。（ここでは maskIndices は必要最小限の指定）
+	// 戻り値は { matched: [ 0 ], masked: [ 2 ] } である。
+	mask(str, ...maskIndices) {
 		
-		const matched = this.match(str) || [], l0 = outers.length, extracted = [], result = { matched, extracted };
+		const matched = this.match(str) || [], l0 = maskIndices.length, masked = [], result = { matched, masked };
 		let l;
 		
 		if (!(l = matched.length) || !l0) return result;
@@ -134,10 +132,10 @@ export class Chr extends Escape {
 		while (++i < l) {
 			i0 = -1, idx = matched[i];
 			while (++i0 < l0) {
-				i1 = -1, l1 = (outer = outers[i0]).length;
+				i1 = -1, l1 = (outer = maskIndices[i0]).length;
 				while (++i1 < l1) if (outer[i1].li - 1 < idx && idx < outer[i1].r) break;
 			}
-			i1 === l1 || (extracted[++ei] = matched.splice(i--, 1)[0], --l);
+			i1 === l1 || (masked[++ei] = matched.splice(i--, 1)[0], --l);
 		}
 		
 		return result;
@@ -167,22 +165,26 @@ export class Brackets {
 		this.rules = rule;
 	}
 	
-	index(str, ...outers) {
+	index(str, ...maskIndices) {
 		
-		const lr = this.l.extract(str, ...outers).matched;
+		const lr = this.l.mask(str, ...maskIndices).matched;
 		let l = lr.length;
 		
 		if (!l) return null;
 		
-		const rr = this.r.extract(str, ...outers).matched, rrl = rr.length;
+		const	eq = this.l.$ === this.r.$, rr = eq ? lr : this.r.mask(str, ...maskIndices).matched, rrl = rr.length;
 		
 		if (!rrl) return null;
 		
-		const indices = [], ll = this.l.$.length, rl = this.r.$.length;
+		const indices = [], ll = this.l.$.length, rl = this.r.$.length, rii = eq ? 2 : 1;
 		let i,i0,ri,ii, L,R;
 		
 		// 右括弧は左端、左括弧は右端から始める。
-		i = l, ii = -1, R = rr[ri = 0];
+		// 左右括弧が同じ文字列の時、右括弧の要素は 0 からではなく 1 から始まる。
+		// 括弧が同じ文字の時、それぞれの文字の役割は自明だからである。
+		// 同じように、対象の右括弧の一致、不一致が確定した時、次に選ばれる右括弧の要素も、その次の要素ではなく、二つ次の要素になる。
+		// これはつまり専用に処理すればより低コストで実装できることを意味するが、現状は上記のように既存の実装を流用している。
+		i = l, ii = -1, R = rr[ri = eq ? 1 : 0];
 		while (--i > -1) {
 			
 			// 右端から始めた左括弧の位置が左端の右括弧の位置より小さくなった時点で、その左右括弧を一組かつ現在の最左方最内側の括弧と認定。
@@ -195,7 +197,7 @@ export class Brackets {
 					// このブロックを通る時、現在の右括弧より左方にある左括弧は存在しない。（つまり左括弧配列の先頭）
 					// 現在の右括弧は一組の括弧にできないと判定して、右括弧配列の位置を示す ri に 1 を加算し、次の右括弧に対象を移す。
 					// その時、現在の右括弧が末尾であれば、残りの左括弧も一組することができないと考えることができるため、ループを終了する。
-					if (++ri === rl) break;
+					if (ri + rii >= rl) break;
 					
 					// 次の右括弧に移った場合、その右括弧は現在およびこれまでの左括弧より右方にある可能性があるため、
 					// 左括弧配列の位置を示す i  を、最右方を示す末尾の位置に戻す。
@@ -213,7 +215,7 @@ export class Brackets {
 			
 			// 既に一組にした左右括弧の情報を各配列から取り除き、特定対象の右括弧をひとつ後方へ移し、ループを再開する。
 			
-			if (++ri === rrl) break;
+			if (ri + rii >= rrl) break;
 			
 			lr.splice(i, 1), i = --l, R = rr[ri];
 			
@@ -225,62 +227,15 @@ export class Brackets {
 	
 }
 
-export class Brackets_ {
+
+// 'a[label:0,5,1,"_",5,"_",2]<#id/textContent>(a,b)*label*'
+export class Poly {
 	
-	constructor(l,r, escChr, escTimes) {
-		
-		if (!l || !r || typeof l !== 'string' || typeof r !== 'string')
-			return new TypeError('Argument 1 and 2 are required and must be given as a string.');
-		
-		this.setLR(l,r, escChr, escTimes);
-		
+	constructor() {
 	}
 	
-	setLR(l,r, escChr, escTimes) {
-		
-		this.l = new Chr(l, escChr, escTimes),
-		this.r = new Chr(r, this.l._, this.l._x);
-		
-	}
 	
-	locate(str) {
-		
-		const lr = this.l.match(str);
-		
-		if (!lr) return null;
-		
-		const rr = this.r.match(str);
-		
-		if (!rr) return null;
-		
-		const indices = [], l = lr.length, rrl = rr.length, ll = this.l.$.length, rl = this.r.$.length;
-		let i,i0,ri,ii, L,R;
-		
-		i = l, ii = -1, R = rr[ri = 0];
-		while (--i > -1) {
-			
-			if (lr[i] > R) {
-				
-				if (i === 0) {
-					if (++ri === rl) break;
-					i = l;
-				}
-				
-				continue;
-				
-			}
-			
-			indices[++ii] = { l: lr[i = --i0], lo: lr[i] - 1, li: lr[i] + ll, r: R, ro: R + rl, ri: R - 1 };
-			
-			if (++ri < rrl) break;
-			
-			R = rr[ri = 0];
-			
-		}
-		
-		return ii === -1 ? null : indices;
-		
-	}
+	
 	
 }
 
