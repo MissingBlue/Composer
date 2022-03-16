@@ -1,95 +1,268 @@
-export class Escape {
+export class Indexer {
 	
-	static _ = '\\';
-	static _x = 2;
-	
-	constructor(_, _x) {
+	constructor() {
 		
-		this.set(_, _x);
+		this.cache = {};
+		
+	}
+	clearCache() {
+		
+		const cache = this.cache;
+		let k;
+		
+		for (k in cache) delete cache[k];
+		
+	}
+	setCache(matched, handler) {
+		
+		const cache = this.cache, input = matched[0]?.input;
+		
+		if (!(input in cache)) {
+			
+			const	indices = [], lastIndices = [], cacheData = cache[input] = { indices, lastIndices, matched },
+					l = matched.length, handles = typeof handler === 'function';
+			let i,i0, m;
+			
+			i = i0 = -1;
+			while (++i < l) (!handles || handler(m = matched[i], i,l, cacheData)) &&
+				(lastIndices[m.indexed = ++i0] = (indices[i0] = m.index) + m[0].length);
+			
+		}
+		
+		return cache[input];
+		
+	}
+	getCache(str) {
+		return this.cache?.[str];
+	}
+	
+}
+export class Unit extends Indexer {
+	
+	// https://qiita.com/HMMNRST/items/4b10dfb621a469034257#-%E5%90%A6%E5%AE%9A%E5%85%88%E8%AA%AD%E3%81%BF
+	static unit = '(?!)';
+	static option = 'g';
+	// https://developer.mozilla.org/ja/docs/Web/JavaScript/Guide/Regular_Expressions#escaping
+	static escapeRegExpStr(regExpStr) {
+		return regExpStr.replace(/[.*+?^=!:${}()|[\]\/\\]/g, '\\$&');
+	}
+	static createGlobalRegExpFromString(rx = Unit.unit, option = Unit.option) {
+		
+		return	rx instanceof RegExp ?
+						rx.global ? rx : new TypeError('RegExp must be global.') :
+						new RegExp(
+									Sequence.escapeRegExpStr('' + (rx || '')),
+									typeof option === 'string' ? option + (option.indexOf('g') === -1 ? 'g' : '') : 'g'
+								);
 		
 	}
 	
-	set(_, _x) {
-		this.setValue(_),
-		this.setTimes(_x);
-	}
-	setValue(_) {
-		this._ = _ && ''+_ || Escape._;
-	}
-	setTimes(_x) {
-		this._x = _x && parseInt(_x) || Escape._x;
-	}
-	
-	// 以下のメソッド内の文字列一致判定は matchAll で行なうべきかもしれないが
-	// matchAll は引数の文字列を RegExp に自動変換するため、エスケープ文字が \ を含む時に非常に複雑な対応が必要になる。
-	
-	// エスケープ判定。エスケープ文字列 _ の後続の繰り返し回数が _x で指定した数で割り切れなかったらエスケープされてると判定。
-	// エスケープされている時はその情報を示す Object を、そうでない時は false を返す。
-	// 第二引数 wish は、初回のエスケープ文字列との一致判定の結果得たその位置情報が、
-	// wish に指定した値と一致していなければ即座に処理を中断して false を返す。
-	// 例えば str の先頭がエスケープであるか判定したい場合、wish に 0 を与えれば、
-	// 0 文字目が非エスケープ文字で、かつ 0 文字目以降にエスケープ文字が存在しても、戻り値は false になる。
-	// この場合、内部的には単に indexOf を一度行なうだけなので、エスケープ文字の望む位置が決まっている場合処理コストが浮く。
-	// wish に負の値を指定した場合、str の末尾からの位置として認識される。
-	escapes(str, wish, startIndex = 0) {
+	constructor(unit, option) {
 		
-		const _ = this._, idx = str.indexOf(_, startIndex), sl = str.length;
+		super(),
 		
-		if (idx === -1 || (typeof wish === 'number' && idx !== (wish < 0 ? sl : 0) + wish)) return false;
-		
-		const _l = _.length, result = {};
-		let i,l;
-		
-		i = idx;
-		do if (str.substr(i, _l) !== _) break; while ((i += _l) < sl);
-		
-		return !!((l = (i - idx)) / _l % this._x) && { times: l / _l, begin: idx, end: i - 1, length: l };
+		this.setUnit(unit, option);
 		
 	}
-	// escapes と同じ判定を指定された文字列の末尾から先頭に向けて遡って行なう。
-	rescapes(str, wish, startIndex) {
+	setUnit(unit, option) {
 		
-		const _ = this._, idx = str.lastIndexOf(_, startIndex), sl = str.length;
+		unit = Unit.createGlobalRegExpFromString(unit, option);
 		
-		if (idx === -1 || (typeof wish === 'number' && idx !== (wish < 0 ? sl : 0) + wish)) return false;
+		const last = this.unit;
 		
-		const _l = _.length, result = {};
-		let i,l;
+		(last instanceof RegExp && last.flags === unit.flags && last.source === unit.source) || this.clearCache();
 		
-		i = idx;
-		while ((i -= _l) > -1) if (str.substr(i, _l) !== _) break;
-		
-		return !!((l = (idx - i)) / _l % this._x) && { times: l / _l, begin: i + 1, end: idx, length: l };
+		return this.unit = unit;
 		
 	}
 	
 }
 
-export class Chr extends Escape {
+export class Sequence extends Unit {
 	
-	static $ = '#';
+	static repetition = 2;
+	static cacheHandler(match) {
+		return !('sequence' in match);
+	}
 	
-	constructor($, _, _x) {
+	constructor(unit, option, repetition) {
 		
-		super(_, _x),
+		super(unit, option),
 		
-		this.setChr($);
+		this.setRepetition(repetition);
 		
 	}
 	
-	setup($, _, _x) {
+	setRepetition(repetition = Sequence.repetition) {
 		
-		this.setChr($),
-		this.set(_, _x);
+		const last = this.repetition;
 		
-	}
-	setChr($) {
+		(this.repetition = Number.isNaN(repetition = parseInt(repetition)) ? Sequence.repetition : repetition) === last ||
+			this.clearCache();
 		
-		return this.$ = $ && $ !== this._ && ''+$ || Chr.$;
+		return this.repetition;
 		
 	}
 	
-	// 以下のメソッド match の文字列一致判定を matchAll で行なわない理由は Escape.prototype.escapes の説明を参照。
+	// 第一引数 str に与えられた文字列の中から、this.seq が示す正規表現に一致する文字列の位置情報を列挙した配列を返す。
+	// str と seq との一致判定処理は String.prototype.matchAll によって行なわれる。
+	// this.repetition に有効な値が設定されている場合、一致した文字列が連続して連なっていると、それらの位置情報を結合する。
+	// その際、結合した位置情報に、連なり内の一致文字列の連続回数を整数値で示すプロパティ sequence が設定される。
+	// 既定ではこの連なりの位置情報は戻り値には含まれない。
+	// この情報を戻り値に含ませる場合、第二引数 includesRepetition に真を示す値を指定する。
+	index(str, includesRepetition) {
+		
+		if (str in this.cache) return this.cache[str];
+		
+		const matched = [ ...str.matchAll(this.unit) ], l = matched.length;
+		
+		if (!l) return this.setCache(matched);
+		
+		const indices = [], repetition = this.repetition;
+		let i,i0,l0,i1,l1,i2,l2, m,m0,mi, ii, times,outOfRepetition,cnt;
+		
+		i = ii = -1;
+		while (++i < l) {
+			
+			i0 = i;
+			while (++i0 < l && (m = matched[i0 - 1]).index + m[0].length === matched[i0].index);
+			
+			if ((times = i0 - i) < repetition) {
+				
+				// 一致した文字列の連なりが規定の繰り返し回数以下の時。
+				// それらの一致はすべて個別の一致として記録される。
+				
+				--i;
+				while (++i < i0) indices[++ii] = matched[i];
+				
+			} else {
+				
+				// 一致した文字列の連なりが規定の繰り返し回数を満たす時。
+				// 繰り返しは左方から順に数えられ、連なりの終端までに繰り返しに端数が出た場合、それらは連なり外の個別の一致として記録される。
+				
+				outOfRepetition = i + times - (cnt = repetition * parseInt(times / repetition));
+				
+				if (includesRepetition) {
+					
+					i1 = i - 1, l1 = i0 - outOfRepetition;
+					while (++i1 < l1) {
+						
+						if ((i1 - outOfRepetition) % cnt)
+							(indices[++ii] = (m = matched[i1])).sequence = repetition, mi = m.length;
+						else {
+							
+							m[0] += (m0 = matched[i1])[0];
+							
+							if (l2 = m0.length) {
+								i2 = 0;
+								while (++i2 < l2) m[++mi] = m0[i2];
+							}
+							
+						}
+						
+					}
+					
+				}
+				
+				i1 = i0 - outOfRepetition - 1;
+				while (++i1 < i0) indices[++ii] = matched[i1];
+				
+			}
+			
+			i = --i0;
+			
+		}
+		
+		return this.setCache(indices, Sequence.cacheHandler);
+		
+	}
+	
+}
+
+export class Chr extends Unit {
+	
+	static unit = '#';
+	static seq = '\\';
+	
+	constructor(unit = Chr.unit, option, seq, seqOption, seqRepetition) {
+		
+		super(unit, option),
+		
+		this.init(unit, option, seq, seqOption, seqRepetition);
+		
+	}
+	
+	init(unit = Chr.unit, option, seq = Chr.seq, seqOption, seqRepetition) {
+		
+		this.masked instanceof Indexer ? this.masked.clearCache() : (this.masked = new Indexer());
+		
+		if ((this.setUnit(unit, option)).source === (this.seq = new Sequence(seq, seqOption, seqRepetition)).source)
+			new Error('The srouce of "unit" and "seq" must be different.');
+		
+	}
+	
+	index(str) {
+		
+		if (str in this.cache) return this.cache[str];
+		
+		const matched = [ ...str.matchAll(this.unit) ], seqLastIndices = this.seq.index(str, true).lastIndices,
+				handler = m => seqLastIndices.indexOf(m.index) === -1;
+		
+		return this.setCache(matched, handler);
+		
+	}
+	
+	// 第一引数 str でこのインスタンスのメソッド match を実行した結果から、
+	// 第二引数 masks に指定された任意の数の文字列範囲を示す位置情報の外側にあるもののみを絞り込んだ結果を含んだ Object を返す。
+	// 絞り込んだ結果は matched、そして maskIndices の内側にあると判定された文字の位置情報は masked に配列の要素として示される。
+	// 第二引数に指定する値は、Brackets のメソッド locate の戻り値か、それに準じたものであることが求められる。
+	// これはプログラミングにおける文字列の判定を想定していて、masks の中にあるこのインスタンスの文字列は、
+	// それ自体は意味を持たない別の文字列として除外することを目的としている。
+	// 例えば str が "a{a}" で、このインスタンスの文字列が a、masks が { } の位置を示す時、
+	// このインスタンスの文字列位置として記録されるのは、一文字目の a だけになる。
+	// コード上では new Chr('a').mask('a{a}', [ { li: 2, r: 3 } ]); と指定する。（ここでは masks の指定は必要最低限）
+	// 戻り値は { ..., masked: [ 2 ], unmasked: [ 0 ] } である。（上記の例で言えば、文字列としての a の位置は masked に記録されている）
+	mask(str, ...masks) {
+		
+		const data = this.index(str), matched = data.matched, l = matched.length, l0 = masks.length;
+		
+		if (!l) return data;
+		
+		if (!l0) {
+			
+			data.unmasked = [ ...matched ];
+			return data;
+			
+		}
+		
+		const unmasked = data.unmasked = [], masked = data.masked = [];
+		let i,i0,i1,l1,m,mi,ui, idx,outer;
+		
+		i = mi = ui = -1;
+		while (++i < l) {
+			
+			if (!('indexed' in (m = matched[i]))) continue;
+			
+			i0 = -1, idx = m.index;
+			while (++i0 < l0) {
+				
+				i1 = -1, l1 = (outer = masks[i0]).length;
+				while (++i1 < l1 && idx < outer[i1].li - 1 && outer[i1].r < idx);
+				if (i1 === l1) continue;
+				masked[++mi] = m;
+				break;
+				
+			}
+			
+			i0 === l0 && (unmasked[++ui] = m);
+			
+		}
+		
+		return data;
+		
+	}
+	
+	// 以下バックアップ
 	
 	match(str) {
 		
@@ -109,6 +282,8 @@ export class Chr extends Escape {
 		
 	}
 	
+	// 以下のメソッド match の文字列一致判定を matchAll で行なわない理由は Escape.prototype.escapes の説明を参照。
+	
 	// 第一引数 str でこのインスタンスのメソッド match を実行した結果から、
 	// 第二引数 maskIndices に指定された任意の数の文字列範囲を示す位置情報の外側にあるもののみを絞り込んだ結果を含んだ Object を返す。
 	// 絞り込んだ結果は matched、そして maskIndices の内側にあると判定された文字の位置情報は masked に配列の要素として示される。
@@ -119,7 +294,7 @@ export class Chr extends Escape {
 	// このインスタンスの文字列位置として記録されるのは、一文字目だけの a になる。
 	// コード上では new Chr('a').mask('a{a}', [ { li: 2, r: 3 } ]); と指定する。（ここでは maskIndices は必要最小限の指定）
 	// 戻り値は { matched: [ 0 ], masked: [ 2 ] } である。
-	mask(str, ...maskIndices) {
+	_mask(str, ...maskIndices) {
 		
 		const matched = this.match(str) || [], l0 = maskIndices.length, masked = [], result = { matched, masked };
 		let l;
@@ -133,7 +308,7 @@ export class Chr extends Escape {
 			i0 = -1, idx = matched[i];
 			while (++i0 < l0) {
 				i1 = -1, l1 = (outer = maskIndices[i0]).length;
-				while (++i1 < l1) if (outer[i1].li - 1 < idx && idx < outer[i1].r) break;
+				while (++i1 < l1) if (outer[i1].lo < idx && idx < outer[i1].ri) break;
 			}
 			i1 === l1 || (masked[++ei] = matched.splice(i--, 1)[0], --l);
 		}
@@ -142,30 +317,113 @@ export class Chr extends Escape {
 		
 	}
 	
+	duplicate() {
+		
+		return new Chr(this.unit.source, this.unit.flags, this.seq.unit.source, this.seq.unit.flags, this.seq.repetition);
+		
+	}
+	isSame(chr) {
+		
+		if (!(chr instanceof Chr)) return false;
+		
+		const u = this.unit, u0 = chr.unit, s = this.seq.unit, s0 = chr.seq.unit;
+		
+		return u.source === u0.source && u.flags === u0.flags &&
+			s.source === s0.source && s.flags === s0.flags && s.repetition === s0.repetition;
+	}
+	
 }
 
 export class Brackets {
 	
-	constructor(l,r, rule, escChr, escTimes) {
+	static chr = '"';
+	static copyChr(a) {
 		
-		if (!l || !r || typeof l !== 'string' || typeof r !== 'string')
-			return new TypeError('Argument 1 and 2 are required and must be given as a string.');
-		
-		this.setLR(l,r, escChr, escTimes);
+		return a instanceof Chr ? a.duplicate() : new Chr(a);
 		
 	}
 	
-	setLR(l,r, escChr, escTimes) {
+	constructor(l, r) {
 		
-		this.l = new Chr(l, escChr, escTimes),
-		this.r = new Chr(r, this.l._, this.l._x);
+		this.setLR(l, r);
 		
-	}
-	setRule(rule) {
-		this.rules = rule;
 	}
 	
-	index(str, ...maskIndices) {
+	setLR(l,r) {
+		
+		this.setL(l), this.setR(r);
+		
+		return this;
+		
+	}
+	setL(l) {
+		
+		return this.setChr('l', 'r', l);
+		
+	}
+	setR(r) {
+		
+		return this.setChr('r', 'l', r);
+		
+	}
+	setChr(k, dk, chr = Brackets.chr) {
+		
+		return this[k] = chr instanceof Chr ? chr : Brackets.copyChr(chr || this[dk]);
+		
+	}
+	
+	locate(str, ...masks) {
+		
+		const lI = this.l.mask(str, ...masks).unmasked, lL = lI.length, locales = [];
+		
+		if (!lL) return locales;
+		
+		const	eq = this.l.isSame(this.r), rI = eq ? lI : this.r.mask(str, ...masks).unmasked, rL = rI.length;
+		
+		if (!rL) return locales;
+		
+		const rShift = eq ? 2 : 1;
+		let i,i0,ri,mi, L,LI, R,RI, locale;
+		
+		// 右括弧は左端、左括弧は右端から始める。
+		// 左右括弧が同じ文字列の時、右括弧の要素は 0 からではなく 1 から始まる。
+		// 括弧が同じ文字の時、それぞれの文字の役割は自明だからである。
+		// 同じように、対象の右括弧の一致、不一致が確定した時、次に選ばれる右括弧の要素も、その次の要素ではなく、二つ次の要素になる。
+		// これはつまり専用の処理を実装すればより短絡化できることを意味するが、現状は既存の枠組の中で行なっている。
+		i = lL, mi = -1, RI = (R = rI[ri = rShift - 1]).index;
+		while (--i > -1) {
+			
+			// 右端から始めた左括弧の位置が左端の右括弧の位置より小さくなった時点で、その左右括弧を一組かつ現在の最左方最内側の括弧と認定。
+			(LI = (L = lI[i]).index) >= RI ?
+				
+				// 上記式が真を示す時、現在の左括弧は、現在の右括弧よりも右方か同位置にある。
+				
+				// この時、i が偽を示せば、現在の右括弧より左方にある左括弧は存在しない（左括弧配列の先頭に到達した）ことを意味する。
+				// 現在の右括弧は一組の括弧にできないと判定して、後続の処理で次の右括弧に移る。
+				// その際、次の右括弧は現在およびこれまでの左括弧より右方にある可能性があるため、
+				// 左括弧配列の位置を示す i を、最右方（配列の末尾）に戻す。
+				i || (i = lL) :
+				
+				// 現在の右括弧の最も近い左方にある左括弧を特定。左右括弧を一組としてその位置情報を記録。
+				(
+					locale = locales[++mi] = { l: L, lo: LI, li: LI + L[0].length, r: R, ri: RI, ro: RI + R[0].length },
+					locale.inner = str.substring(locale.li, locale.ri),
+					locale.outer = str.substring(locale.lo, locale.ro)
+				);
+			
+			// 右括弧配列の位置を示す ri を次の対象の要素に位置に変え、特定対象の右括弧要素を変更する。
+			// その時、現在の右括弧が配列内の末尾であれば、残りの左括弧も一組することができないと考えることができるため、ループを終了する。
+			if (!(R = rI[ri += rShift])) break;
+			
+			RI = R.index;
+			
+		}
+		
+		return locales;
+		
+	}
+	
+	_index(str, ...maskIndices) {
 		
 		const lr = this.l.mask(str, ...maskIndices).matched;
 		let l = lr.length;
@@ -183,7 +441,7 @@ export class Brackets {
 		// 左右括弧が同じ文字列の時、右括弧の要素は 0 からではなく 1 から始まる。
 		// 括弧が同じ文字の時、それぞれの文字の役割は自明だからである。
 		// 同じように、対象の右括弧の一致、不一致が確定した時、次に選ばれる右括弧の要素も、その次の要素ではなく、二つ次の要素になる。
-		// これはつまり専用に処理すればより低コストで実装できることを意味するが、現状は上記のように既存の実装を流用している。
+		// これはつまり専用の処理を実装すればより短絡化できることを意味するが、現状は既存の枠組の中で行なっている。
 		i = l, ii = -1, R = rr[ri = eq ? 1 : 0];
 		while (--i > -1) {
 			
