@@ -275,7 +275,6 @@ export class Chr extends Unit {
 	
 }
 
-//TODO: l.isSame(r) が真を示す時の動作検証。
 export class Brackets {
 	
 	static chr = '"';
@@ -330,7 +329,7 @@ export class Brackets {
 		const rShift = isSame ? 2 : 1, localedL = [];
 		let i,i0,mi, L,LI, R,RI, locale;
 		
-		i = rShift - 2, mi = -1;
+		i = -1, mi = -1;hi(i,rL);
 		while ((i += rShift) < rL) {
 			i0 = lL, RI = (R = rI[i]).index;
 			while (--i0 > -1 && (lI[i0].index >= RI || localedL.indexOf(i0) !== -1));
@@ -340,58 +339,6 @@ export class Brackets {
 				locale.inner = str.substring(locale.li, locale.ri),
 				locale.outer = str.substring(locale.lo, locale.ro);
 			}
-		}
-		
-		return locales;
-		
-	}
-	_locate(str, ...masks) {
-		
-		const lI = this.l.mask(str, ...masks).unmasked, lL = lI.length, locales = [];
-		
-		if (!lL) return locales;
-		
-		const	isSame = this.l.isSame(this.r), rI = isSame ? lI : this.r.mask(str, ...masks).unmasked, rL = rI.length;
-		
-		if (!rL) return locales;
-		
-		const rShift = isSame ? 2 : 1, localedL = [];
-		let i,i0,ri,mi, L,LI, R,RI, locale;
-		
-		// 全面的な書き換えの必要。最初に右側が一致した場所から遡って左側を特定する？
-		
-		// 右括弧は左端、左括弧は右端から始める。
-		// 左右括弧が同じ文字列の時、右括弧の要素は 0 からではなく 1 から始まる。
-		// 括弧が同じ文字の時、それぞれの文字の役割は自明だからである。
-		// 同じように、対象の右括弧の一致、不一致が確定した時、次に選ばれる右括弧の要素も、その次の要素ではなく、二つ次の要素になる。
-		// これはつまり専用の処理を実装すればより短絡化できることを意味するが、現状は既存の枠組の中で行なっている。
-		i = lL, mi = -1, RI = (R = rI[ri = rShift - 1]).index;
-		while (--i > -1) {
-			
-			// 右端から始めた左括弧の位置が左端の右括弧の位置より小さくなった時点で、その左右括弧を一組かつ現在の最左方最内側の括弧と認定。
-			(LI = (L = lI[i]).index) >= RI ?
-				
-				// 上記式が真を示す時、現在の左括弧は、現在の右括弧よりも右方か同位置にある。
-				
-				// この時、i が偽を示せば、現在の右括弧より左方にある左括弧は存在しない（左括弧配列の先頭に到達した）ことを意味する。
-				// 現在の右括弧は一組の括弧にできないと判定して、後続の処理で次の右括弧に移る。
-				// その際、次の右括弧は現在およびこれまでの左括弧より右方にある可能性があるため、
-				// 左括弧配列の位置を示す i を、最右方（配列の末尾）に戻す。
-				i || (i = lL) :
-				
-				// 現在の右括弧の最も近い左方にある左括弧を特定。左右括弧を一組としてその位置情報を記録。
-				(
-					locale = locales[++mi] = { l: L, lo: LI, li: LI + L[0].length, r: R, ri: RI, ro: RI + R[0].length },
-					locale.inner = str.substring(locale.li, locale.ri),
-					locale.outer = str.substring(locale.lo, locale.ro)
-				);
-			
-			// 右括弧配列の位置を示す ri を次の対象の要素に位置に変え、特定対象の右括弧要素を変更する。
-			// その時、現在の右括弧が配列内の末尾であれば、残りの左括弧も一組することができないと考えることができるため、ループを終了する。
-			if (!(R = rI[ri += rShift])) break;
-			
-			RI = R.index;
-			
 		}
 		
 		return locales;
