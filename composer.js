@@ -224,96 +224,37 @@ export class Chr extends Unit {
 	// 戻り値は { ..., masked: [ 2 ], unmasked: [ 0 ] } である。（上記の例で言えば、文字列としての a の位置は masked に記録されている）
 	mask(str, ...masks) {
 		
-		const data = this.index(str), matched = data.matched, l = matched.length, l0 = masks.length;
+		const	data = { ...this.index(str), unmasked: [], masked: [] }, matched = data.matched, l = matched.length,
+				unmasked = data.unmasked, l0 = masks.length;
+		let i,umi;
 		
-		if (!l) return data;
+		i = umi = -1;
+		while (++i < l) 'indexed' in matched[i] && (unmasked[++umi] = matched[i]);
 		
-		if (!l0) {
-			
-			data.unmasked = [ ...matched ];
-			return data;
-			
-		}
+		if (!l || !l0 || umi === -1) return data;
 		
-		const unmasked = data.unmasked = [], masked = data.masked = [];
-		let i,i0,i1,l1,m,mi,ui, idx,outer;
+		const masked = data.masked;
+		let i0,i1,l1,um,idx,mi,mask;
 		
-		i = mi = ui = -1;
-		while (++i < l) {
+		i = mi = -1;
+		while (++i < umi) {
 			
-			if (!('indexed' in (m = matched[i]))) continue;
-			
-			i0 = -1, idx = m.index;
+			i0 = -1, idx = (um = unmasked[i]).index;
 			while (++i0 < l0) {
 				
-				i1 = -1, l1 = (outer = masks[i0]).length;
-				while (++i1 < l1 && idx < outer[i1].li - 1 && outer[i1].r < idx);
+				i1 = -1, l1 = (mask = masks[i0]).length;
+				while (++i1 < l1 && (idx < mask[i1].lo || mask[i1].ro <= idx));
+				
 				if (i1 === l1) continue;
-				masked[++mi] = m;
+				
+				masked[++mi] = um, unmasked.splice(i--, 1), --umi;
 				break;
 				
 			}
 			
-			i0 === l0 && (unmasked[++ui] = m);
-			
 		}
 		
 		return data;
-		
-	}
-	
-	// 以下バックアップ
-	
-	match(str) {
-		
-		const $ = this.$;
-		let idx;
-		
-		if ((idx = str.indexOf($)) === -1) return null;
-		
-		const $l = $.length;
-		let i, results, current;
-		
-		i = -1, current = str;
-		do this.rescapes(current.substring(0, idx), -1) || ((results ||= [])[++i] = (results[i - 1] ?? 0) + idx);
-		while ((idx = (current = current.substring(idx)).indexOf($, $l)) !== -1);
-		
-		return i === -1 ? null : results;
-		
-	}
-	
-	// 以下のメソッド match の文字列一致判定を matchAll で行なわない理由は Escape.prototype.escapes の説明を参照。
-	
-	// 第一引数 str でこのインスタンスのメソッド match を実行した結果から、
-	// 第二引数 maskIndices に指定された任意の数の文字列範囲を示す位置情報の外側にあるもののみを絞り込んだ結果を含んだ Object を返す。
-	// 絞り込んだ結果は matched、そして maskIndices の内側にあると判定された文字の位置情報は masked に配列の要素として示される。
-	// 第二引数に指定する値は、Brackets のメソッド locate の戻り値か、それに準じたものであることが求められる。
-	// これはプログラミングにおける文字列の判定を想定していて、maskIndices の中にあるこのインスタンスの文字列は、
-	// それ自体は意味を持たない別の文字列として除外することを目的としている。
-	// 例えば str が "a{a}" で、このインスタンスの文字列が a、maskIndices が { } の位置を示す時、
-	// このインスタンスの文字列位置として記録されるのは、一文字目だけの a になる。
-	// コード上では new Chr('a').mask('a{a}', [ { li: 2, r: 3 } ]); と指定する。（ここでは maskIndices は必要最小限の指定）
-	// 戻り値は { matched: [ 0 ], masked: [ 2 ] } である。
-	_mask(str, ...maskIndices) {
-		
-		const matched = this.match(str) || [], l0 = maskIndices.length, masked = [], result = { matched, masked };
-		let l;
-		
-		if (!(l = matched.length) || !l0) return result;
-		
-		let i,i0,i1,l1,ei, idx,outer;
-		
-		i = ei = -1;
-		while (++i < l) {
-			i0 = -1, idx = matched[i];
-			while (++i0 < l0) {
-				i1 = -1, l1 = (outer = maskIndices[i0]).length;
-				while (++i1 < l1) if (outer[i1].lo < idx && idx < outer[i1].ri) break;
-			}
-			i1 === l1 || (masked[++ei] = matched.splice(i--, 1)[0], --l);
-		}
-		
-		return result;
 		
 	}
 	
@@ -334,6 +275,7 @@ export class Chr extends Unit {
 	
 }
 
+//TODO: l.isSame(r) が真を示す時の動作検証。
 export class Brackets {
 	
 	static chr = '"';
@@ -341,6 +283,9 @@ export class Brackets {
 		
 		return a instanceof Chr ? a.duplicate() : new Chr(a);
 		
+	}
+	static sortLocales(a, b) {
+		return a.lo - b.lo;
 	}
 	
 	constructor(l, r) {
@@ -378,12 +323,42 @@ export class Brackets {
 		
 		if (!lL) return locales;
 		
-		const	eq = this.l.isSame(this.r), rI = eq ? lI : this.r.mask(str, ...masks).unmasked, rL = rI.length;
+		const	isSame = this.l.isSame(this.r), rI = isSame ? lI : this.r.mask(str, ...masks).unmasked, rL = rI.length;
 		
 		if (!rL) return locales;
 		
-		const rShift = eq ? 2 : 1;
+		const rShift = isSame ? 2 : 1, localedL = [];
+		let i,i0,mi, L,LI, R,RI, locale;
+		
+		i = rShift - 2, mi = -1;
+		while ((i += rShift) < rL) {
+			i0 = lL, RI = (R = rI[i]).index;
+			while (--i0 > -1 && (lI[i0].index >= RI || localedL.indexOf(i0) !== -1));
+			if (L = lI[i0]) {
+				localedL[++mi] = i0,
+				locale = locales[mi] = { l: L, lo: L.index, li: L.index + L[0].length, r: R, ri: RI, ro: RI + R[0].length },
+				locale.inner = str.substring(locale.li, locale.ri),
+				locale.outer = str.substring(locale.lo, locale.ro);
+			}
+		}
+		
+		return locales;
+		
+	}
+	_locate(str, ...masks) {
+		
+		const lI = this.l.mask(str, ...masks).unmasked, lL = lI.length, locales = [];
+		
+		if (!lL) return locales;
+		
+		const	isSame = this.l.isSame(this.r), rI = isSame ? lI : this.r.mask(str, ...masks).unmasked, rL = rI.length;
+		
+		if (!rL) return locales;
+		
+		const rShift = isSame ? 2 : 1, localedL = [];
 		let i,i0,ri,mi, L,LI, R,RI, locale;
+		
+		// 全面的な書き換えの必要。最初に右側が一致した場所から遡って左側を特定する？
 		
 		// 右括弧は左端、左括弧は右端から始める。
 		// 左右括弧が同じ文字列の時、右括弧の要素は 0 からではなく 1 から始まる。
@@ -423,63 +398,34 @@ export class Brackets {
 		
 	}
 	
-	_index(str, ...maskIndices) {
+	// this.locale で得た情報を、その位置情報に基づいて階層化させる。
+	// 各要素には内包する要素を列挙した配列を示すプロパティ nested が設定される。
+	// 情報は not in place で階層化される（つまり引数に与えた値は変化しない）が、要素内のプロパティの作成はシャローコピーで行なわれる。
+	// 第二引数 callback に関数を与えると、階層化する前の要素を引数に与えて階層化順にその関数を実行する。
+	// 階層化は左方上位から下位に向けて行なわれ、最下位まで到達すると右方へ移行する。
+	// 関数の戻り値が真を示すと、その要素は、その子要素を含め階層に含まれない。（その子要素へのコールバック関数の実行も行なわれない）
+	// 関数には要素、要素の位置、階層化前の情報の要素長、階層化前の情報を列挙した配列、このインスタンスの参照が順に引数として与えられる。
+	nest(locales, callback) {
 		
-		const lr = this.l.mask(str, ...maskIndices).matched;
-		let l = lr.length;
+		const	locs = [ ...locales ], l = locs.length, data = [], nested = [],
+				hasCallback = typeof callback === 'function';
+		let i,i0,di,ni, loc, datum, cancels;
 		
-		if (!l) return null;
+		locs.sort(Brackets.sortLocales),
 		
-		const	eq = this.l.$ === this.r.$, rr = eq ? lr : this.r.mask(str, ...maskIndices).matched, rrl = rr.length;
-		
-		if (!rrl) return null;
-		
-		const indices = [], ll = this.l.$.length, rl = this.r.$.length, rii = eq ? 2 : 1;
-		let i,i0,ri,ii, L,R;
-		
-		// 右括弧は左端、左括弧は右端から始める。
-		// 左右括弧が同じ文字列の時、右括弧の要素は 0 からではなく 1 から始まる。
-		// 括弧が同じ文字の時、それぞれの文字の役割は自明だからである。
-		// 同じように、対象の右括弧の一致、不一致が確定した時、次に選ばれる右括弧の要素も、その次の要素ではなく、二つ次の要素になる。
-		// これはつまり専用の処理を実装すればより短絡化できることを意味するが、現状は既存の枠組の中で行なっている。
-		i = l, ii = -1, R = rr[ri = eq ? 1 : 0];
-		while (--i > -1) {
+		i = di = -1;
+		while (++i < l) {
 			
-			// 右端から始めた左括弧の位置が左端の右括弧の位置より小さくなった時点で、その左右括弧を一組かつ現在の最左方最内側の括弧と認定。
-			if (lr[i] >= R) {
-				
-				// このブロックを通る時、現在の左括弧は、現在の右括弧よりも右方か同位置にある。
-				
-				if (!i) {
-					
-					// このブロックを通る時、現在の右括弧より左方にある左括弧は存在しない。（つまり左括弧配列の先頭）
-					// 現在の右括弧は一組の括弧にできないと判定して、右括弧配列の位置を示す ri に 1 を加算し、次の右括弧に対象を移す。
-					// その時、現在の右括弧が末尾であれば、残りの左括弧も一組することができないと考えることができるため、ループを終了する。
-					if (ri + rii >= rl) break;
-					
-					// 次の右括弧に移った場合、その右括弧は現在およびこれまでの左括弧より右方にある可能性があるため、
-					// 左括弧配列の位置を示す i  を、最右方を示す末尾の位置に戻す。
-					i = l;
-					
-				}
-				
-				continue;
-				
-			}
+			i0 = i, ni = -1, datum = { ...(loc = locs[i]) },
+			cancels = hasCallback && callback(loc, i,l, locs, this);
+			while (++i0 < l && locs[i0].ri < loc.ri) nested[++ni] = locs[i0];
 			
-			// 現在の右括弧の最も近い左方にある左括弧を特定。左右括弧を一組としてその位置情報を記録。
-			
-			indices[++ii] = { l: lr[i], lo: lr[i] - 1, li: lr[i] + ll, r: R, ro: R + rl, ri: R - 1 };
-			
-			// 既に一組にした左右括弧の情報を各配列から取り除き、特定対象の右括弧をひとつ後方へ移し、ループを再開する。
-			
-			if (ri + rii >= rrl) break;
-			
-			lr.splice(i, 1), i = --l, R = rr[ri];
+			cancels || (data[++di] = datum, ni === -1 || (datum.nested = this.nest(nested))),
+			ni === -1 || (nested.length = 0), i = i0 - 1;
 			
 		}
 		
-		return ii === -1 ? null : indices;
+		return data;
 		
 	}
 	
