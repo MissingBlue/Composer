@@ -286,6 +286,30 @@ export class Brackets {
 	static sortLocales(a, b) {
 		return a.lo - b.lo;
 	}
+	static plot(...data) {
+		
+		const locs = [], dl = data.length, result = [], max = Math.max, min = Math.min;
+		let i,i0,l0,li, datum, loc,sub,cursor;
+		
+		i = li = -1;
+		while (++i < dl) {
+			i0 = -1, l0 = (datum = data[i]).length;
+			while (++i0 < l0) locs[++li] = datum[i0];
+		}
+		
+		const str = locs.sort(Brackets.sortLocales)[0].l.input,
+				sl = str.length - 1;
+		
+		i = i0 = -1, cursor = 0, ++li;
+		while (++i < li) {
+			(sub = str.substring(cursor, max((loc = locs[i]).lo, 0))) && (result[++i0] = sub);
+			if (min(cursor = (result[++i0] = loc).ro, sl) === sl) break;
+		}
+		cursor < sl && (result[++i0] = str.substring(cursor));
+		
+		return result;
+		
+	}
 	
 	constructor(l, r) {
 		
@@ -329,7 +353,7 @@ export class Brackets {
 		const rShift = isSame ? 2 : 1, localedL = [];
 		let i,i0,mi, L,LI, R,RI, locale;
 		
-		i = -1, mi = -1;hi(i,rL);
+		i = -1, mi = -1;
 		while ((i += rShift) < rL) {
 			i0 = lL, RI = (R = rI[i]).index;
 			while (--i0 > -1 && (lI[i0].index >= RI || localedL.indexOf(i0) !== -1));
@@ -378,15 +402,55 @@ export class Brackets {
 	
 }
 
-
-// 'a[label:0,5,1,"_",5,"_",2]<#id/textContent>(a,b)*label*'
-export class Poly {
+// []
+// 	開始値,終了値,増加値,字詰め文字,桁数(正の値の場合先頭方向、負の値の場合末尾方向へ字詰めする)
+// 'a[label:0,5,1,"_",5]<#id/textContent>(a,b)*label*'
+export class Amplifier {
 	
-	constructor() {
-	}
+	static str = new Brackets();
+	static dom = new Brackets('<','>');
+	static amp = new Brackets('[',']');
+	static frk = new Brackets('(',')');
+	static lbl = /^(.*?):/;
+	static lblc = new Chr(':');
+	static re = new Brackets('*','*');
 	
+	constructor() {}
 	
-	
+	static get(v) {
+		
+		const	str = Amplifier.str.locate(v),
+				dom = Amplifier.dom.locate(v, str),
+				amp = Amplifier.amp.locate(v, str, dom),
+				frk = Amplifier.frk.locate(v, str, dom),
+				re = Amplifier.re.locate(v, str, dom),
+				plot = Brackets.plot(dom, amp, frk, re),
+				l = plot.length,
+				labeled = {};
+		let i, p;
+		
+		i = -1;
+		while (++i < l) {
+			
+			if (typeof (p = plot[i]) === 'string') continue;
+			
+			iStr = Amplifier.str.locate(inner = p.inner);
+			
+			if (p.inner.match(lbl)) {
+				
+			}
+			
+			switch (p.l[0]) {
+				case '[':
+				datum = {
+					from: 
+				}
+				break;
+				
+			}
+		}
+		
+	};
 	
 }
 
