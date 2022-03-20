@@ -13,6 +13,11 @@ export class Indexer {
 		for (k in cache) delete cache[k];
 		
 	}
+	// キャッシュされる値は matchAll の戻り値である配列内の要素をそのまま使う。
+	// すべての要素にはプロパティ input があり、、これは一致検索の文字列全体を示す。
+	// つまり各要素の input は重複しており、仮にその文字列が非常に巨大だった場合、リソースに負荷を与えることが予想される。
+	// このプロパティ input は、現状では（多分）使用していないため、削除するか、別に一元化してプロパティとして保存しても恐らく問題はないと思われる。
+	// ただし、単純に削除した場合、出力から入力を復元することができなくなる点に留意が必要。
 	setCache(matched, handler) {
 		
 		const cache = this.cache, input = matched[0]?.input;
@@ -196,8 +201,13 @@ export class Chr extends Unit {
 		
 		this.masked instanceof Indexer ? this.masked.clearCache() : (this.masked = new Indexer());
 		
-		if ((this.setUnit(unit, option)).source === (this.seq = new Sequence(seq, seqOption, seqRepetition)).source)
+		if ((this.setUnit(unit, option)).source === this.setSeq(seq, seqOption, seqRepetition).source)
 			new Error('The srouce of "unit" and "seq" must be different.');
+		
+	}
+	setSeq(seq, seqOption, seqRepetition) {
+		
+		return this.seq = seq instanceof Sequence ? seq : new Sequence(seq, seqOption, seqRepetition);
 		
 	}
 	
@@ -231,19 +241,19 @@ export class Chr extends Unit {
 		i = umi = -1;
 		while (++i < l) 'indexed' in matched[i] && (unmasked[++umi] = matched[i]);
 		
-		if (!l || !l0 || umi === -1) return data;
+		if (!l || !l0 || umi++ === -1) return data;
 		
 		const masked = data.masked;
-		let i0,i1,l1,um,idx,mi,mask;
+		let i0,i1,l1,um,idx,len,mi,mask;
 		
 		i = mi = -1;
 		while (++i < umi) {
 			
-			i0 = -1, idx = (um = unmasked[i]).index;
+			i0 = -1, len = (idx = (um = unmasked[i]).index) + um[0].length;
 			while (++i0 < l0) {
 				
 				i1 = -1, l1 = (mask = masks[i0]).length;
-				while (++i1 < l1 && (idx < mask[i1].lo || mask[i1].ro <= idx));
+				while (++i1 < l1 && (len <= mask[i1].lo || mask[i1].ro <= idx));
 				
 				if (i1 === l1) continue;
 				
@@ -255,6 +265,19 @@ export class Chr extends Unit {
 		}
 		
 		return data;
+		
+	}
+	split(str, ...masks) {
+		
+		const separators = this.mask(...arguments).unmasked, l = separators.length, splitted = [];
+		let i,i0, cursor,idx,separator;
+		
+		i = i0 = -1, cursor = 0;
+		while (++i < l)	splitted[++i0] = str.substring(cursor, idx = (separator = separators[i]).index),
+								cursor = idx + separator[0].length;
+		splitted[++i0] = str.substring(cursor);
+		
+		return splitted;
 		
 	}
 	
@@ -278,18 +301,24 @@ export class Chr extends Unit {
 export class Brackets {
 	
 	static chr = '"';
-	static copyChr(a) {
+	static copyChr(a, esc) {
 		
-		return a instanceof Chr ? a.duplicate() : new Chr(a);
+		return a instanceof Chr ? a.duplicate() : new Chr(a, undefined, esc);
 		
 	}
 	static sortLocales(a, b) {
 		return a.lo - b.lo;
 	}
-	static plot(...data) {
+	static plot(str, ...data) {
 		
-		const locs = [], dl = data.length, result = [], max = Math.max, min = Math.min;
-		let i,i0,l0,li, datum, loc,sub,cursor;
+		if (!(str += '')) return [ '' ];
+		
+		const dl = data.length;
+		
+		if (!dl) return [ str ];
+		
+		const locs = [];
+		let i,i0,l0,li, datum;
 		
 		i = li = -1;
 		while (++i < dl) {
@@ -297,13 +326,15 @@ export class Brackets {
 			while (++i0 < l0) locs[++li] = datum[i0];
 		}
 		
-		const str = locs.sort(Brackets.sortLocales)[0].l.input,
-				sl = str.length - 1;
+		if (li === -1) return [ str ];
 		
-		i = i0 = -1, cursor = 0, ++li;
+		const sl = str.length - 1, result = [], max = Math.max, min = Math.min;
+		let loc,sub,cursor;
+		
+		i = i0 = -1, cursor = 0, ++li, locs.sort(Brackets.sortLocales);
 		while (++i < li) {
 			(sub = str.substring(cursor, max((loc = locs[i]).lo, 0))) && (result[++i0] = sub);
-			if (min(cursor = (result[++i0] = loc).ro, sl) === sl) break;
+			if (min(cursor = (result[++i0] = loc).ro, sl) === sl) break;;
 		}
 		cursor < sl && (result[++i0] = str.substring(cursor));
 		
@@ -311,32 +342,35 @@ export class Brackets {
 		
 	}
 	
-	constructor(l, r) {
+	constructor(l, r, esc) {
 		
-		this.setLR(l, r);
+		this.setLR(l, r, esc);
 		
 	}
 	
-	setLR(l,r) {
+	setLR(l,r, esc) {
 		
-		this.setL(l), this.setR(r);
+		this.setL(l, esc), this.setR(r, esc);
 		
 		return this;
 		
 	}
-	setL(l) {
+	setL(l, esc) {
 		
-		return this.setChr('l', 'r', l);
-		
-	}
-	setR(r) {
-		
-		return this.setChr('r', 'l', r);
+		return this.setChr('l', 'r', l, esc);
 		
 	}
-	setChr(k, dk, chr = Brackets.chr) {
+	setR(r, esc) {
 		
-		return this[k] = chr instanceof Chr ? chr : Brackets.copyChr(chr || this[dk]);
+		return this.setChr('r', 'l', r, esc);
+		
+	}
+	setChr(k, dk, chr = Brackets.chr, esc) {
+		
+		//return this[k] = chr instanceof Chr ? chr : Brackets.copyChr(chr || this[dk], esc);
+		return this[k] =	chr instanceof Chr ? chr :
+									chr ? new Chr(chr, undefined, esc) :
+										this[dk] instanceof Chr ? this[dk] : new Chr(this[dk] || Brackets.chr, undefined, esc);
 		
 	}
 	
@@ -356,8 +390,8 @@ export class Brackets {
 		i = -1, mi = -1;
 		while ((i += rShift) < rL) {
 			i0 = lL, RI = (R = rI[i]).index;
-			while (--i0 > -1 && (lI[i0].index >= RI || localedL.indexOf(i0) !== -1));
-			if (L = lI[i0]) {
+			while (--i0 > -1 && ((L = lI[i0]).index + L[0].length > RI || localedL.indexOf(i0) !== -1));
+			if (i0 > -1) {
 				localedL[++mi] = i0,
 				locale = locales[mi] = { l: L, lo: L.index, li: L.index + L[0].length, r: R, ri: RI, ro: RI + R[0].length },
 				locale.inner = str.substring(locale.li, locale.ri),
@@ -402,48 +436,103 @@ export class Brackets {
 	
 }
 
-// []
-// 	開始値,終了値,増加値,字詰め文字,桁数(正の値の場合先頭方向、負の値の場合末尾方向へ字詰めする)
-// 'a[label:0,5,1,"_",5]<#id/textContent>(a,b)*label*'
-export class Amplifier {
+// 検討
+// ・実際に使用せず変数的に値を保存するだけのラベル。後方で利用する。
+// ・substring のような、文字列の切り抜き構文。
+//
+// 単一行に対して構文解析を行ない、任意の文字列を生成する。
+// 解析は杜撰で、エラーハンドリング等も一切実装しておらず、堅牢性はない。
+// 構文に使う文字列を、通常の文字列として使う場合はその直前に \\ を指定する。
+// \\ を文字列として使う場合は、\\\\ になる。
+// ' を使う構文があるため、解析の対象文字列は " で囲うことを推奨。
+// '...'
+// 	シングルクォーテーションで囲まれた値は常に文字列を示す。
+// 	文字列中では構文に使う文字を含め、" 以外の任意の文字列を通常の JavaScript の文字列と同様 \\ なしで指定できる。
+// [...]
+// 	左から順に 開始値,終了値,増加値,字詰め文字,桁数(正の値の場合先頭方向、負の値の場合末尾方向へ字詰めする) を記す。
+// 	開始値、終了値には文字列も指定できる。その場合、増加値は開始値のコードポイントに加算される。
+// 	例えば ["a","c",1] は 'a' 'b' 'c' を生成する。
+// <...>
+// 	構文解析の実行スコープが属するドキュメントから、セレクターに一致するすべての要素の、指定したプロパティの値で文字列を生成する。
+// 	<'セレクター' プロパティ名> で実行する。
+// 	(<'セレクター'> の場合は自動で要素の textContent を、<'セレクター' ...>の場合は ... を属性値として認識するように変更予定)
+// 	検討: / を @ にした場合、それ以降の文字列を要素のスタイルシートのプロパティ名として認識する
+// 	todo: セレクターはシングルクォーテーションで囲う。セレクターに > が存在する場合、そのままだと解析に不整合が生じるため。
+// (...)
+// 	括弧内のコンマで区切られた値で分岐させる。
+// 	検討: () の中で、値として構文を使えるようにする。この場合、() を構文ヒエラルキーの最上位か第二位にする必要がある？
+// *...*
+// 	各括弧の行頭から : までの間はラベルとして認識される。
+// 	そのラベル名をアスタリスクで囲んだものは、そのラベルの値で代替される。
+//
+// エスケープも含め、上記の構文文字は任意の文字に変更しようと思えばできなくはないが、一切動作検証していないので強く推奨しない。
+
+// "a[label:0,5,1,'_',5]<#id/textContent>(a,b)*label*"
+export class Strings {
 	
-	static str = new Brackets();
-	static dom = new Brackets('<','>');
-	static amp = new Brackets('[',']');
-	static frk = new Brackets('(',')');
-	static lbl = /^(.*?):/;
-	static lblc = new Chr(':');
-	static re = new Brackets('*','*');
+	static esc = new Sequence('\\');
+	static str = new Brackets("'","'", Strings.esc);
+	static dom = new Brackets('<','>', Strings.esc);
+	static amp = new Brackets('[',']', Strings.esc);
+	static frk = new Brackets('(',')', Strings.esc);
+	//static lbl = /^(.*?):/;
+	static lbl = new Chr(/^(.*?):/g, undefined, Strings.esc);
+	static re = new Brackets('*','*', Strings.esc);
 	
-	constructor() {}
+	static cmm = new Chr(',', undefined, Strings.esc);
+	static num = /^\s*(-?\d+(?:\.\d+)?)\s*$/;
+	static stx = new RegExp(`^\\s*${Strings.str.l.unit.source}(.*)${Strings.str.r.unit.source}\\s*$`);
 	
 	static get(v) {
 		
-		const	str = Amplifier.str.locate(v),
-				dom = Amplifier.dom.locate(v, str),
-				amp = Amplifier.amp.locate(v, str, dom),
-				frk = Amplifier.frk.locate(v, str, dom),
-				re = Amplifier.re.locate(v, str, dom),
-				plot = Brackets.plot(dom, amp, frk, re),
+		const	str = Strings.str.locate(v),
+				dom = Strings.dom.locate(v, str),
+				amp = Strings.amp.locate(v, str, dom),
+				frk = Strings.frk.locate(v, str, dom),
+				re = Strings.re.locate(v, str, dom),
+				plot = Brackets.plot(v, dom, amp, frk, re),
 				l = plot.length,
 				labeled = {};
-		let i, p;
+		let i,i0,l0,i1,l1, p,innerStr,inner,label,datum,values,value,sValues, matched;
+		
+		hi(plot);
 		
 		i = -1;
 		while (++i < l) {
 			
 			if (typeof (p = plot[i]) === 'string') continue;
 			
-			iStr = Amplifier.str.locate(inner = p.inner);
+			innerStr = Strings.str.locate(inner = p.inner);
+			(label = Strings.lbl.mask(inner, innerStr).unmasked?.[0]) &&
+				(innerStr = Strings.str.locate(inner = inner.substring(label.index + label[0].length))),
 			
-			if (p.inner.match(lbl)) {
-				
+			//coco
+			sValues = Strings.str.locate(inner),
+			i0 = -1, l0 = (values = Strings.cmm.split(inner, sValues)).length;
+			while (++i0 < l0) {
+				if (matched = values[i0].match(Strings.num)) {
+					
+					values[i0] = +matched[1];
+					
+				} else if (matched = values[i0].match(Strings.stx)) {
+					
+					values[i0] = matched[1];
+					
+				} else {
+					
+					values[i0] = undefined;
+					
+				}
 			}
+			
+			hi(inner, values);
+			
+			continue;
 			
 			switch (p.l[0]) {
 				case '[':
 				datum = {
-					from: 
+					from: 0,
 				}
 				break;
 				
