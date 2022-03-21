@@ -29,7 +29,7 @@ export class Indexer {
 			let i,i0, m;
 			
 			i = i0 = -1;
-			while (++i < l) (!handles || handler(m = matched[i], i,l, cacheData)) &&
+			while (++i < l) ((m = matched[i]).captor = this, !handles || handler(m, i,l, cacheData)) &&
 				(lastIndices[m.indexed = ++i0] = (indices[i0] = m.index) + m[0].length);
 			
 		}
@@ -374,6 +374,11 @@ export class Brackets {
 		
 	}
 	
+	mask(str, ...masks) {
+		
+		return { l: this.l.mask(str, ...masks), r: this.r.mask(str, ...masks) };
+		
+	}
 	locate(str, ...masks) {
 		
 		const lI = this.l.mask(str, ...masks).unmasked, lL = lI.length, locales = [];
@@ -395,7 +400,8 @@ export class Brackets {
 				localedL[++mi] = i0,
 				locale = locales[mi] = { l: L, lo: L.index, li: L.index + L[0].length, r: R, ri: RI, ro: RI + R[0].length },
 				locale.inner = str.substring(locale.li, locale.ri),
-				locale.outer = str.substring(locale.lo, locale.ro);
+				locale.outer = str.substring(locale.lo, locale.ro),
+				locale.captor = this;
 			}
 		}
 		
@@ -436,6 +442,7 @@ export class Brackets {
 	
 }
 
+// 以下のコメントは備忘録的なもので、内容は不正確。
 // 検討
 // ・実際に使用せず変数的に値を保存するだけのラベル。後方で利用する。
 // ・substring のような、文字列の切り抜き構文。
@@ -457,7 +464,8 @@ export class Brackets {
 // 	<'セレクター' プロパティ名> で実行する。
 // 	(<'セレクター'> の場合は自動で要素の textContent を、<'セレクター' ...>の場合は ... を属性値として認識するように変更予定)
 // 	検討: / を @ にした場合、それ以降の文字列を要素のスタイルシートのプロパティ名として認識する
-// 	todo: セレクターはシングルクォーテーションで囲う。セレクターに > が存在する場合、そのままだと解析に不整合が生じるため。
+// 	todo
+// 		セレクターはシングルクォーテーションで囲う。セレクターに > が存在する場合、そのままだと解析に不整合が生じるため。
 // (...)
 // 	括弧内のコンマで区切られた値で分岐させる。
 // 	検討: () の中で、値として構文を使えるようにする。この場合、() を構文ヒエラルキーの最上位か第二位にする必要がある？
@@ -467,9 +475,10 @@ export class Brackets {
 //
 // エスケープも含め、上記の構文文字は任意の文字に変更しようと思えばできなくはないが、一切動作検証していないので強く推奨しない。
 
-// "a[label:0,5,1,'_',5]<#id/textContent>(a,b)*label*"
+// "a[label:0,5,1,'_',5]<"#id[class=\\"sample\\"]">(a,b)*label*"
 export class Strings {
 	
+	// esc = escape, str = string, dom = document object model, amp = amplifier, frk = fork, lbl = label, re = recycle
 	static esc = new Sequence('\\');
 	static str = new Brackets("'","'", Strings.esc);
 	static dom = new Brackets('<','>', Strings.esc);
@@ -479,65 +488,119 @@ export class Strings {
 	static lbl = new Chr(/^(.*?):/g, undefined, Strings.esc);
 	static re = new Brackets('*','*', Strings.esc);
 	
+	// dot, cmm = comma, or, num = number, stx = ??? maybe a relevant string, lv = labeled value
+	static dot = new Chr('.', undefined, Strings.esc);
 	static cmm = new Chr(',', undefined, Strings.esc);
+	static or = new Chr('|', undefined, Strings.esc);
 	static num = /^\s*(-?\d+(?:\.\d+)?)\s*$/;
 	static stx = new RegExp(`^\\s*${Strings.str.l.unit.source}(.*)${Strings.str.r.unit.source}\\s*$`);
+	static lv = /^\s*([$A-Za-z_\u0080-\uFFFF][$\w\u0080-\uFFFF]*)\s*$/g;
 	
+	static settle(str, labeled) {
+		
+		let matched;
+		
+		return	(matched = str.match(Strings.num)) ? +matched[1] :
+						(matched = str.match(Strings.stx)) ? matched[1] :
+						(labeled && typeof labeled === 'object' && (matched = str.match(Strings.lv))) ?
+							labeled?.[matched[1]] ?? undefined : undefined;
+		
+	}
+	static getArgs(str, labeled, ...locs) {
+		
+		const args = Strings.cmm.split(str, ...locs), l = args.length;
+		let i;
+		
+		i = -1;
+		while (++i < l) args[i] = Strings.settle(args[i], labeled);
+		
+		return args;
+		
+	}
 	static get(v) {
 		
-		const	str = Strings.str.locate(v),
-				dom = Strings.dom.locate(v, str),
-				amp = Strings.amp.locate(v, str, dom),
-				frk = Strings.frk.locate(v, str, dom),
-				re = Strings.re.locate(v, str, dom),
-				plot = Brackets.plot(v, dom, amp, frk, re),
+		const	{ str, dom, amp, frk, re, cmm, or } = Strings,
+				strLocs = str.locate(v),
+				domLocs = dom.locate(v, strLocs),
+				ampLocs = amp.locate(v, strLocs, domLocs),
+				frkLocs = frk.locate(v, strLocs, domLocs),
+				reLocs = re.locate(v, strLocs, domLocs),
+				plot = Brackets.plot(v, domLocs, ampLocs, frkLocs, reLocs),
 				l = plot.length,
-				labeled = {};
-		let i,i0,l0,i1,l1, p,innerStr,inner,label,datum,values,value,sValues, matched;
+				labeled = {},
+				values = [];
+		let i,i0,l0,i1,l1,vi,vi0, p,innerStr,inner,label,datum,args,arg,value, argStrLocs,argFrkLocs, matched;
 		
 		hi(plot);
 		
-		i = -1;
+		i = vi = -1;
 		while (++i < l) {
 			
-			if (typeof (p = plot[i]) === 'string') continue;
-			
-			innerStr = Strings.str.locate(inner = p.inner);
-			(label = Strings.lbl.mask(inner, innerStr).unmasked?.[0]) &&
-				(innerStr = Strings.str.locate(inner = inner.substring(label.index + label[0].length))),
-			
-			//coco
-			sValues = Strings.str.locate(inner),
-			i0 = -1, l0 = (values = Strings.cmm.split(inner, sValues)).length;
-			while (++i0 < l0) {
-				if (matched = values[i0].match(Strings.num)) {
-					
-					values[i0] = +matched[1];
-					
-				} else if (matched = values[i0].match(Strings.stx)) {
-					
-					values[i0] = matched[1];
-					
-				} else {
-					
-					values[i0] = undefined;
-					
-				}
+			if (typeof (p = plot[i]) === 'string') {
+				values[++vi] = p;
+				continue;
 			}
 			
-			hi(inner, values);
+			innerStr = str.locate(inner = p.inner);
+			(label = Strings.lbl.mask(inner, innerStr).unmasked?.[0]) &&
+				(innerStr = str.locate(inner = inner.substring(label.index + label[0].length))),
+			argStrLocs = str.locate(inner),
+			argFrkLocs = frk.locate(inner);
 			
-			continue;
-			
-			switch (p.l[0]) {
-				case '[':
-				datum = {
-					from: 0,
+			switch (p.captor) {
+				
+				case amp:
+				
+				args = Strings.getArgs(inner, labeled, argStrLocs),
+				
+				value = {
+					from: args[0],
+					to: args[1],
+					value: args[2],
+					methods: [
+						{ name: 'padStart', args: [ args?.[3] ?? -1, args?.[4] ?? undefined ] },
+						{ name: 'padEnd', args: [ args?.[5] ?? -1, args?.[6] ?? undefined ] }
+					]
+				};
+				
+				break;
+				
+				case frk:
+				i0 = vi0 = -1, l0 = (args = or.split(inner, argStrLocs, argFrkLocs)).length, value = [];
+				while (++i0 < l0) {
+					i1 = -1, l1 = (arg = Strings.get(args[i0]))?.length ?? 0;
+					while (++i1 < l1) value[++vi0] = arg[i1];
 				}
 				break;
 				
+				case re:
+				value = labeled[value] ?? '';
+				break;
+				
+				case dom:
+				args = Strings.getArgs(inner, labeled, argStrLocs),
+				arg = Strings.str.locate(args[0]),
+				hi(args[0],Strings.str.l,(args[0]));
+				value = {
+					selector: args?.[0],
+					propertyName: args?.[1]
+				};
+				
+				break;
+				
+				default:
+				value = inner;
+				
 			}
+			
+			values[++vi] = value,
+			label && (labeled[label] = value);
+			
 		}
+		
+		hi(...values);
+		
+		return values;
 		
 	};
 	
@@ -586,21 +649,22 @@ export class Composer {
 	// 第二引数に指定された配列の要素に対して行なう。
 	// values の中の要素は文字列であることが暗黙的に求められる。
 	// 記述子は Object で、以下のプロパティを指定できる。
+	//		value
+	//			実行対象。未指定であれば values に与えられた対象の値になる。
 	// 	name
 	//			処理される要素が持つメソッド名。例えば要素が文字列なら、String のメソッドなどが指定できる。
 	// 	args (optional)
 	// 		name が示すメソッドに渡される引数を列挙した配列。
-	// 上記のプロパティから察せられる通り、記述子の指定内容は、name が示すメソッドに apply を通して反映される。
-	// apply の第一引数は常に values の該当要素自身になる。
+	// 上記記述子の指定内容は、name が示すメソッドに apply を通して反映される。
 	static applyAll(apps, values = []) {
 		
 		const l = values.length, l0 = apps.length;
-		let i,i0;
+		let i,i0, app;
 		
 		i = -1;
 		while (++i < l) {
 			i0 = -1;
-			while (++i0 < l0) values[i] = values[i]?.[apps[i0].name]?.apply(values[i], apps[i0]?.args);
+			while (++i0 < l0) values[i] = ((app = apps[i0]).target = app?.target ?? values[i])?.[app.name]?.apply(app.target, app?.args);
 		}
 		
 		return values;
