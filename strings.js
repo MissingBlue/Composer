@@ -455,6 +455,11 @@ export class Brackets {
 // '...'
 // 	シングルクォーテーションで囲まれた値は常に文字列を示す。
 // 	文字列中では構文に使う文字を含め、" 以外の任意の文字列を通常の JavaScript の文字列と同様 \\ なしで指定できる。
+// `...`
+// 	括弧中の文字列を JavaScript として実行し、return によって返された値を戻り値として使う。
+// 	引数 labeled に、ラベルを付けた値をプロパティに示す Object が与えられる。
+// 	仕様で補え切れない状況に対応するための応急処置的な使用を想定しており、可読性を著しく落とす。
+// 	この括弧中でのテンプレート文字列の使用は現状非対応。
 // [...]
 // 	左から順に 開始値,終了値,増加値,字詰め文字,桁数(正の値の場合先頭方向、負の値の場合末尾方向へ字詰めする) を記す。
 // 	開始値、終了値には文字列も指定できる。その場合、増加値は開始値のコードポイントに加算される。
@@ -464,8 +469,6 @@ export class Brackets {
 // 	<'セレクター' プロパティ名> で実行する。
 // 	(<'セレクター'> の場合は自動で要素の textContent を、<'セレクター' ...>の場合は ... を属性値として認識するように変更予定)
 // 	検討: / を @ にした場合、それ以降の文字列を要素のスタイルシートのプロパティ名として認識する
-// 	todo
-// 		セレクターはシングルクォーテーションで囲う。セレクターに > が存在する場合、そのままだと解析に不整合が生じるため。
 // (...)
 // 	括弧内のコンマで区切られた値で分岐させる。
 // 	検討: () の中で、値として構文を使えるようにする。この場合、() を構文ヒエラルキーの最上位か第二位にする必要がある？
@@ -475,134 +478,213 @@ export class Brackets {
 //
 // エスケープも含め、上記の構文文字は任意の文字に変更しようと思えばできなくはないが、一切動作検証していないので強く推奨しない。
 
-// "a[label:0,5,1,'_',5]<"#id[class=\\"sample\\"]">(a,b)*label*"
+// 使用例:
+// 	Strings.get("a`return '0'+1;`[label:0,5,1,5,'_',2,'_']<'#id[id=\"sample\"]', 'textContent'>(a|b)*label*");
 export class Strings {
 	
-	// esc = escape, str = string, dom = document object model, amp = amplifier, frk = fork, lbl = label, re = recycle
-	static esc = new Sequence('\\');
-	static str = new Brackets("'","'", Strings.esc);
-	static dom = new Brackets('<','>', Strings.esc);
-	static amp = new Brackets('[',']', Strings.esc);
-	static frk = new Brackets('(',')', Strings.esc);
-	//static lbl = /^(.*?):/;
-	static lbl = new Chr(/^(.*?):/g, undefined, Strings.esc);
-	static re = new Brackets('*','*', Strings.esc);
-	
-	// dot, cmm = comma, or, num = number, stx = ??? maybe a relevant string, lv = labeled value
-	static dot = new Chr('.', undefined, Strings.esc);
-	static cmm = new Chr(',', undefined, Strings.esc);
-	static or = new Chr('|', undefined, Strings.esc);
-	static num = /^\s*(-?\d+(?:\.\d+)?)\s*$/;
-	static stx = new RegExp(`^\\s*${Strings.str.l.unit.source}(.*)${Strings.str.r.unit.source}\\s*$`);
-	static lv = /^\s*([$A-Za-z_\u0080-\uFFFF][$\w\u0080-\uFFFF]*)\s*$/g;
-	
-	static settle(str, labeled) {
+	static {
 		
-		let matched;
+		// esc = escape, str = string
+		const esc = this.esc = new Sequence('\\'), str = this.str = new Brackets("'","'", esc);
 		
-		return	(matched = str.match(Strings.num)) ? +matched[1] :
-						(matched = str.match(Strings.stx)) ? matched[1] :
-						(labeled && typeof labeled === 'object' && (matched = str.match(Strings.lv))) ?
-							labeled?.[matched[1]] ?? undefined : undefined;
+		// dom = document object model, amp = amplifier, frk = fork, lbl = label, re = recycle
+		this.evl = new Brackets('`','`', esc),
+		this.dom = new Brackets('<','>', esc),
+		this.amp = new Brackets('[',']', esc),
+		this.frk = new Brackets('(',')', esc),
+		//this.lbl = /^(.*?):/;
+		this.lbl = new Chr(/^(.*?):/g, undefined, esc),
+		this.re = new Brackets('*','*', esc),
+		
+		// dot, cmm = comma, or, num = number, stx = ??? maybe a relevant string, lv = labeld value
+		this.dot = new Chr('.', undefined, esc),
+		this.cmm = new Chr(',', undefined, esc),
+		this.or = new Chr('|', undefined, esc),
+		this.num = /^\s*(-?\d+(?:\.\d+)?)\s*$/,
+		this.stx = new RegExp(`^\\s*${str.l.unit.source}(.*)${str.r.unit.source}\\s*$`),
+		this.lv = /^\s*([$A-Za-z_\u0080-\uFFFF][$\w\u0080-\uFFFF]*)\s*$/g,
+		
+		this.hierarchy = [
+			str,
+			this.evl,
+			this.dom,
+			[ this.amp, this.frk, this.re ]
+		],
+		
+		this.cache = {};
 		
 	}
-	static getArgs(str, labeled, ...locs) {
+	
+	// 第一引数 str に指定した文字列に、第二引数 hierarchy 内に列挙された Brackets のインスタンスの持つメソッド locate を順に実行し、
+	// その結果を第三引数 result に指定された Object のプロパティに記録して、それを戻り値にする。
+	// result はこのメソッド内での再帰処理用の引数で、通常指定する必要はない。
+	// 各 Brackets の結果は、以下のようにカスケード的に後続の locate の引数に与えられる。
+	// Strings.locate('hi', [ brk0, brk1, brk2 ]);
+	//		...locale0 = brk0.locate(str);
+	// 	...locale1 = brk1.locate(str, locale0);
+	// 	...locale2 = brk2.locate(str, locale0, locale1);
+	// hierarchy 内で配列をネストした場合、ネストされた Brackets.locate は前述のように先行する Brackets.locate の結果を引数として与えられるが、
+	// 以下のように同じネスト内の他の Brackets.locate の結果は引数に加えない。
+	// Strings.locate('hi', [ brk0, [ brk1, brk2 ], brk3 ]);
+	// 	...locale1 = brk1.locate(str, locale0);
+	// 	...locale2 = brk2.locate(str, locale0);
+	// 	...brk3.locate(str, locale0, locale1, locale2);
+	// 戻り値は Brackets.locate の結果を示す Object で、プロパティに data, named を持つ。
+	// data には実行したすべての Brackets.locate の結果を***一切の例外なく機械的に再帰順で***列挙する。
+	// 仮に hierarchy にネストが含まれていても、data 内の要素は並列に列挙される。
+	// named は、hierarchy の Brackets が Object のプロパティとして指定された場合、その OBject のプロパティ name をプロパティ名にして、
+	// named の中にプロパティとして設定される。
+	// Strings.locate(str, [ brk0, { target: brk1, name: 'stuff' } ]);
+	// 	// = { data: [ locale0, locale1 ], named: { stuff: locale1 } }
+	// named も、hierarchy のネストを考慮しない。name の重複は後続の結果で上書きされる。
+	// 基本的にはこの関数は内部処理以外で使うことを想定しておらず、
+	// さらに言えばコードの平易化以外を目的としていないが、入力が適切であれば（この関数が持つ目的に対して）汎用的に動作すると思われる。
+	// 当初はネスト後、さらにネストした先の Brackets.locate の結果は、後続の Brackets.locate の引数に含ませないようにするつもりだったが（直系ではないため）、
+	// 非常に複雑な仕組みが必要になりそうなわりに、現状ではそうしたケースに対応する必要がないため、現状のような簡易なものにしている。
+	// 今の仕様でこうした状況に対応する場合、異なる hierarchy を作成し、個別に実行することで対応が期待できるかもしれない。
+	// 同じように、現状では存在しないが、Brackets.locate 相当のメソッドを持つ Brackets 以外のオブジェクトに対応する必要もあるかもしれない。
+	// 仕組みが仕様と密接に結びついており、コードだけ見ても存在理由が理解し難いため、比較的詳細な説明を記しているが、
+	// 目的そのものは上記の通り単なる可読性の向上のため以上のものではなく、重要性の低い処理を担っている。
+	// 例えば Strings.get 内にある "Brackets.plot(v, ...Strings.locate(v).data.slice(1))" で
+	// 第二引数以下に渡す引数を直接指定することができるのであれば、この関数はまったく必要ない。
+	static locate(str, hierarchy = Strings.hierarchy, result = { data: [], named: {} }) {
+		
+		let i;
+		
+		if (Array.isArray(hierarchy)) {
+			
+			let l0, data = result.data;
+			const l = hierarchy.length, stored = data, current = [], locate = Strings.locate;
+			
+			i = -1, l0 = stored.length;
+			while (++i < l)	Array.isArray(hierarchy[i]) && (result.data = data = [ ...stored ]),
+									locate(str, hierarchy[i], result),
+									data === stored ?	(l0 = stored.length) :
+															(current.push(...data.slice(l0)), result.data = data = stored);
+			current.length && stored.push(...current);
+			
+		} else if (hierarchy && typeof hierarchy === 'object') {
+			
+			const { data, named } = result;
+			
+			hierarchy = data[data.length] =
+				(hierarchy instanceof Brackets ? hierarchy : (i = hierarchy?.name, hierarchy.target)).locate(str, ...data),
+			i && (named[i] = hierarchy);
+			
+		}
+		
+		return result;
+		
+	}
+	
+	static get(v) {
+		
+		if (v in this.cache) return this.cache[v];
+		
+		const plot = Brackets.plot(v, ...Strings.locate(v).data.slice(1)), l = plot.length, values = [], labeld = {};
+		let i;
+		
+		hi(plot);
+		
+		i = -1;
+		while (++i < l) values[i] = Strings.parseBlock(plot[i], labeld);
+		
+		return this.cache[v] = values;
+		
+	};
+	static parseBlock(block, labeld = {}) {
+		
+		if (typeof block === 'string') return block;
+		
+		const { str, evl, lbl, frk } = Strings,
+				{ label, strLocs, inner } = Strings.parseInner(block.inner, block.captor === evl);
+		let i,l,i0,l0, args, v,vi, arg;
+		
+		switch (block.captor) {
+			
+			case Strings.evl:
+			v = (new Function('labeld', inner))(labeld);
+			break;
+			
+			case Strings.amp:
+			
+			args = Strings.getArgs(inner, labeld, str.locate(inner), evl.locate(inner)),
+			
+			v = {
+				from: args[0],
+				to: args[1],
+				value: args[2],
+				methods: [
+					{ name: 'padStart', args: [ args?.[3] ?? -1, args?.[4] ?? undefined ] },
+					{ name: 'padEnd', args: [ args?.[5] ?? -1, args?.[6] ?? undefined ] }
+				]
+			};
+			
+			break;
+			
+			case Strings.frk:
+			i = vi = -1,
+			l = (args = Strings.or.split(inner, str.locate(inner), evl.locate(inner), frk.locate(inner))).length, v = [];
+			while (++i < l) {
+				i0 = -1, l0 = (arg = Strings.get(args[i]))?.length ?? 0;
+				while (++i0 < l0) v[++vi] = arg[i0];
+			}
+			break;
+			
+			case Strings.re:
+			v = labeld[v] ?? '';
+			break;
+			
+			case Strings.dom:
+			args = Strings.getArgs(inner, labeld, str.locate(inner), evl.locate(inner)),
+			v = {
+				selector: args?.[0],
+				propertyName: args?.[1]
+			};
+			break;
+			
+			default:
+			v = inner;
+			
+		}
+		
+		return label ? (labeld[label] = v) : v;
+		
+	}
+	static parseInner(inner, unlabels) {
+		
+		const	str = Strings.str,
+				locs = str.locate(inner),
+				label = unlabels || Strings.lbl.mask(inner, locs).unmasked?.[0];
+		
+		return {
+				label: label && label[1],
+				strLocs: label && !unlabels ? str.locate(inner = inner.substring(label.index + label[0].length)) : locs,
+				inner
+			};
+		
+	}
+	static getArgs(str, labeld, ...locs) {
 		
 		const args = Strings.cmm.split(str, ...locs), l = args.length;
 		let i;
 		
 		i = -1;
-		while (++i < l) args[i] = Strings.settle(args[i], labeled);
+		while (++i < l) args[i] = Strings.settle(args[i], labeld);
 		
 		return args;
 		
 	}
-	static get(v) {
+	static settle(str, labeld) {
 		
-		const	{ str, dom, amp, frk, re, cmm, or } = Strings,
-				strLocs = str.locate(v),
-				domLocs = dom.locate(v, strLocs),
-				ampLocs = amp.locate(v, strLocs, domLocs),
-				frkLocs = frk.locate(v, strLocs, domLocs),
-				reLocs = re.locate(v, strLocs, domLocs),
-				plot = Brackets.plot(v, domLocs, ampLocs, frkLocs, reLocs),
-				l = plot.length,
-				labeled = {},
-				values = [];
-		let i,i0,l0,i1,l1,vi,vi0, p,innerStr,inner,label,datum,args,arg,value, argStrLocs,argFrkLocs, matched;
+		let matched;
 		
-		hi(plot);
+		return	(matched = str.match(Strings.num)) ? +matched[1] :
+						(matched = str.match(Strings.stx)) ? matched[1] :
+						(labeld && typeof labeld === 'object' && (matched = str.match(Strings.lv))) ?
+							labeld?.[matched[1]] ?? undefined : undefined;
 		
-		i = vi = -1;
-		while (++i < l) {
-			
-			if (typeof (p = plot[i]) === 'string') {
-				values[++vi] = p;
-				continue;
-			}
-			
-			innerStr = str.locate(inner = p.inner);
-			(label = Strings.lbl.mask(inner, innerStr).unmasked?.[0]) &&
-				(innerStr = str.locate(inner = inner.substring(label.index + label[0].length))),
-			argStrLocs = str.locate(inner),
-			argFrkLocs = frk.locate(inner);
-			
-			switch (p.captor) {
-				
-				case amp:
-				
-				args = Strings.getArgs(inner, labeled, argStrLocs),
-				
-				value = {
-					from: args[0],
-					to: args[1],
-					value: args[2],
-					methods: [
-						{ name: 'padStart', args: [ args?.[3] ?? -1, args?.[4] ?? undefined ] },
-						{ name: 'padEnd', args: [ args?.[5] ?? -1, args?.[6] ?? undefined ] }
-					]
-				};
-				
-				break;
-				
-				case frk:
-				i0 = vi0 = -1, l0 = (args = or.split(inner, argStrLocs, argFrkLocs)).length, value = [];
-				while (++i0 < l0) {
-					i1 = -1, l1 = (arg = Strings.get(args[i0]))?.length ?? 0;
-					while (++i1 < l1) value[++vi0] = arg[i1];
-				}
-				break;
-				
-				case re:
-				value = labeled[value] ?? '';
-				break;
-				
-				case dom:
-				args = Strings.getArgs(inner, labeled, argStrLocs),
-				arg = Strings.str.locate(args[0]),
-				hi(args[0],Strings.str.l,(args[0]));
-				value = {
-					selector: args?.[0],
-					propertyName: args?.[1]
-				};
-				
-				break;
-				
-				default:
-				value = inner;
-				
-			}
-			
-			values[++vi] = value,
-			label && (labeled[label] = value);
-			
-		}
-		
-		hi(...values);
-		
-		return values;
-		
-	};
+	}
 	
 }
 
