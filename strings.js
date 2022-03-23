@@ -181,6 +181,18 @@ export class Sequence extends Unit {
 		return this.setCache(indices, Sequence.cacheHandler);
 		
 	}
+	replace(str, replacer = '') {
+		
+		const matched = this.index(str, true).matched, l = matched.length, u = this.unit;
+		let i,m,lm, replaced;
+		
+		i = -1, replaced = '';
+		while (++i < l) replaced += str.substring(lm ? lm.index + lm[0].length : 0, (m = matched[i]).index) +
+			('sequence' in (lm = m) ? m[0].substring(0, m[0].length / m.sequence) : m[0].replaceAll(u, replacer));
+		
+		return replaced += lm ? str.substring(lm.index + lm[0].length) : str;
+		
+	}
 	
 }
 
@@ -442,39 +454,66 @@ export class Brackets {
 	
 }
 
-// 以下のコメントは備忘録的なもので、内容は不正確。
-// 検討
-// ・実際に使用せず変数的に値を保存するだけのラベル。後方で利用する。
-// ・substring のような、文字列の切り抜き構文。
+// todo:
+// 	<...> で、属性やstyle、dataset へのアクセス方法など。
+// 	(...) の再帰をほぼ検証していないため動作確認。
+// 	構文の繰り返し。（正規表現の {n} のような）
+// 	dom で外部 HTML を読み込み。（これは無理？）
 //
-// 単一行に対して構文解析を行ない、任意の文字列を生成する。
-// 解析は杜撰で、エラーハンドリング等も一切実装しておらず、堅牢性はない。
-// 構文に使う文字列を、通常の文字列として使う場合はその直前に \\ を指定する。
-// \\ を文字列として使う場合は、\\\\ になる。
+// 構文に基づいて文字列を生成する。
+// 構文にエラーハンドリング等は一切実装しておらず、堅牢性はない。
+// エスケープは \\ で行なう。\\(=\) を文字列として使う場合は、\\\\ になる。
 // ' を使う構文があるため、解析の対象文字列は " で囲うことを推奨。
+//
 // '...'
 // 	シングルクォーテーションで囲まれた値は常に文字列を示す。
-// 	文字列中では構文に使う文字を含め、" 以外の任意の文字列を通常の JavaScript の文字列と同様 \\ なしで指定できる。
+// 	文字列中では構文に使う文字を含め、クォーテーション(",')以外の任意の文字列を通常の JavaScript の文字列と同様 \\ なしで指定できる。
+// 	エスケープする際は " は \、' は \\ で行なう。
+// [...]
+// 	左から順に 開始値,終了値,増加値,字詰め文字,桁数(正の値の場合先頭方向、負の値の場合末尾方向へ字詰めする) を記す。
+// 	開始値、終了値には文字列も指定できる。その場合、増加値は開始値のコードポイントに加算される。
+// 	例えば ['a','c',1] は 'a' 'b' 'c' を生成する。
+// <...>
+// 	スクリプトの実行スコープが属するドキュメントから、セレクターに一致するすべての要素の、指定したプロパティの値で文字列を生成する。
+// 	<'セレクター', '属性名'> で実行する。属性名を省略した場合、選択要素の textContent に置き換わる。
+// (...)
+// 	括弧内のコンマで区切られた値で分岐させる。値間は | で区切る。
+// 	この中の値は、Strings.get を再帰して処理される。
+// 	そのため、文字列の指定は ' で囲わずに行なう必要がある。
+// 	そして再帰されるため、任意の構文を必要に応じて使用することができる。
+// 	再帰前にラベル付けした値も再帰先から参照できる。（ただし再帰先で同名のラベルを付けた場合、再帰前の同名ラベルはそのラベルの値で上書きされる）
+// :, ;
+// 	[labeled: ...] のように、各括弧内の行頭から : ないし ; までの間はラベルとして認識される。
+// 	ラベルを : で閉じた場合、その括弧の値はその場で展開されると同時にラベル付けされて記録もされる。
+// 	ラベルを ; で閉じた場合、その括弧の値はラベル付けされて後方参照が可能になるが、その場での展開はされない。
+// 	ラベル付けされた値を再利用するには、それより後方で下記構文 *...* を使う。
+// 	なお、実際には、すべての構文にラベルが暗黙に割り当てられる。
+// 	明示的にラベルを指定していない構文に対しては、ただの文字列も含め、全体の左から数えたその構文の位置が便宜的なラベルになる。
+// 	例えば "a(b|c)d*1**2*"の場合、生成される文字列は [ 'abdbd', 'abdcd', 'acdbd', 'acdcd' ] である。
+// 	この出力は、明示的にラベル付けした "a(1:b|c)(2:d)*1**2*" の出力と等価である。
+// *...*
+// 	ラベル名をアスタリスクで囲んだものは、そのラベルの値で代替される。
+// 	この構文を使用する時、ラベル名の先頭に / を付けると、ラベル付けされた値の適用方法を切り替える。
+// 	/ なしの場合、値は それ以前に生成されたすべての文字列 * ラベル付けされた値が持つ文字列の数 分生成される。
+// 	/ を付けた場合、ラベル付けされた値は単純にそれまで生成された文字列に結合され、ラベル付けされた値の数 < それまでに生成された文字列の数 だった場合、
+// 	ラベル付けされた値は不足に達した時点でラベル付けされた値内を周回して不足分を補う。
+// 	以下は動作モードの違いによる出力の例。
+// 	labeled = [ 0, 1, 2 ], strings = [ 'a', 'b', 'c', 'd', 'e' ]
+// 	Strings.get("[labeled;0,2,1]['a','e',1]*labeled*");
+// 		// [ 'a0', 'a1, 'a2', 'b0', 'b1', 'b2', 'c0', 'c1, 'c2', 'd0', 'd1, 'd2', 'e0', 'e1, 'e2' ]
+//		Strings.get("[labeled;0,2,1]['a','e',1]*/labeled*");
+// 		// [ 'a0', 'b1, 'c2', 'd0', 'e1' ]
 // `...`
 // 	括弧中の文字列を JavaScript として実行し、return によって返された値を戻り値として使う。
 // 	引数 labeled に、ラベルを付けた値をプロパティに示す Object が与えられる。
 // 	仕様で補え切れない状況に対応するための応急処置的な使用を想定しており、可読性を著しく落とす。
 // 	この括弧中でのテンプレート文字列の使用は現状非対応。
-// [...]
-// 	左から順に 開始値,終了値,増加値,字詰め文字,桁数(正の値の場合先頭方向、負の値の場合末尾方向へ字詰めする) を記す。
-// 	開始値、終了値には文字列も指定できる。その場合、増加値は開始値のコードポイントに加算される。
-// 	例えば ["a","c",1] は 'a' 'b' 'c' を生成する。
-// <...>
-// 	構文解析の実行スコープが属するドキュメントから、セレクターに一致するすべての要素の、指定したプロパティの値で文字列を生成する。
-// 	<'セレクター' プロパティ名> で実行する。
-// 	(<'セレクター'> の場合は自動で要素の textContent を、<'セレクター' ...>の場合は ... を属性値として認識するように変更予定)
-// 	検討: / を @ にした場合、それ以降の文字列を要素のスタイルシートのプロパティ名として認識する
-// (...)
-// 	括弧内のコンマで区切られた値で分岐させる。
-// 	検討: () の中で、値として構文を使えるようにする。この場合、() を構文ヒエラルキーの最上位か第二位にする必要がある？
-// *...*
-// 	各括弧の行頭から : までの間はラベルとして認識される。
-// 	そのラベル名をアスタリスクで囲んだものは、そのラベルの値で代替される。
+// {...}
+// 	値間を , で区切り、最初の値を実行主体、次の値(文字列)を(JavaScript APIの)メソッド名、以降をそのメソッドの引数として、指定のメソッドを実行する。
+// 	直接値を指定する場合、数値か文字列しか指定できないが、他の構文、例えば `...` と組み合わせることで間接的に任意の値を指定できる。
+// 	値にはラベルを変数的に指定でき、その際はラベルの文字列を * で囲む必要はない。
+// 	ただし、この場合、指定するラベルは JavaScript の識別子が定める命名規則に従っていなければならない。
+// 	https://developer.mozilla.org/ja/docs/Glossary/Identifier
 //
 // エスケープも含め、上記の構文文字は任意の文字に変更しようと思えばできなくはないが、一切動作検証していないので強く推奨しない。
 
@@ -485,30 +524,41 @@ export class Strings {
 	static {
 		
 		// esc = escape, str = string
-		const esc = this.esc = new Sequence('\\'), str = this.str = new Brackets("'","'", esc);
+		const	esc = this.esc = new Sequence('\\'),
+				str = this.str = new Brackets("'","'", esc),
+				evl = this.evl = new Brackets('`','`', esc);
 		
-		// dom = document object model, amp = amplifier, frk = fork, lbl = label, re = recycle
-		this.evl = new Brackets('`','`', esc),
+		// fnc = function, dom = document object model, amp = amplifier, frk = fork, lbl = label, re = recycle
+		this.fnc = new Brackets('{','}', esc),
+		this.fnc = new Brackets('{','}', esc),
 		this.dom = new Brackets('<','>', esc),
 		this.amp = new Brackets('[',']', esc),
 		this.frk = new Brackets('(',')', esc),
 		//this.lbl = /^(.*?):/;
-		this.lbl = new Chr(/^(.*?):/g, undefined, esc),
+		this.lbl = new Chr(/^(.*?)(;|:)/g, undefined, esc),
+		this.dup = new Chr(/\^\s*?(\d+)\s*(?:,((?:.|\s)*?))?$/g, undefined, esc),
 		this.re = new Brackets('*','*', esc),
+		this.reFlag = '/',
 		
-		// dot, cmm = comma, or, num = number, stx = ??? maybe a relevant string, lv = labeld value
+		// dot, cmm = comma, or, num = number, stx = regeXp for STring, evx = regexp for eval,
+		// idt = identify (= labeled value)
 		this.dot = new Chr('.', undefined, esc),
 		this.cmm = new Chr(',', undefined, esc),
 		this.or = new Chr('|', undefined, esc),
 		this.num = /^\s*(-?\d+(?:\.\d+)?)\s*$/,
 		this.stx = new RegExp(`^\\s*${str.l.unit.source}(.*)${str.r.unit.source}\\s*$`),
-		this.lv = /^\s*([$A-Za-z_\u0080-\uFFFF][$\w\u0080-\uFFFF]*)\s*$/g,
+		this.evx = new RegExp(`^\\s*${evl.l.unit.source}(.*)${evl.r.unit.source}\\s*$`),
+		this.idt = /^\s*([$A-Za-z_\u0080-\uFFFF][$\w\u0080-\uFFFF]*)\s*$/g,
 		
+		// 実際に使用される主な構文を優先順で列挙したリスト。
+		// 一切検証していないが、使用する構文の可否をこの値の変更だけで任意に行なえるかもしれない。
+		// 例えばセキュアであることが求められる場合、以下の this.evl を消すことで簡易に対応できる。
 		this.hierarchy = [
 			str,
+			this.re,
 			this.evl,
 			this.dom,
-			[ this.amp, this.frk, this.re ]
+			[ this.amp, this.frk ]
 		],
 		
 		this.cache = {};
@@ -577,66 +627,97 @@ export class Strings {
 		
 	}
 	
-	static get(v) {
+	static get(v, labeled = {}) {
 		
 		if (v in this.cache) return this.cache[v];
 		
-		const plot = Brackets.plot(v, ...Strings.locate(v).data.slice(1)), l = plot.length, values = [], labeld = {};
+		const locs = [ ...Strings.locate(v).data ],
+				plot = Brackets.plot(v, ...(locs.splice(Strings.hierarchy.indexOf(Strings.str), 1), locs)),
+				l = plot.length, values = [];
 		let i;
 		
-		hi(plot);
+		//hi(plot);
 		
 		i = -1;
-		while (++i < l) values[i] = Strings.parseBlock(plot[i], labeld);
+		while (++i < l) values[i] = Strings.parseBlock(plot[i], labeled);
 		
-		return this.cache[v] = values;
+		//hi(...values, labeled);
+		
+		const composed = Composer.compose(values), cl = composed.length;
+		
+		i = -1;
+		while (++i < cl) composed[i] = Strings.esc.replace(composed[i]);
+		
+		return this.cache[v] = composed;
 		
 	};
-	static parseBlock(block, labeld = {}) {
+	static parseBlock(block, labeled = {}) {
 		
-		if (typeof block === 'string') return block;
+		let l;
 		
-		const { str, evl, lbl, frk } = Strings,
-				{ label, strLocs, inner } = Strings.parseInner(block.inner, block.captor === evl);
-		let i,l,i0,l0, args, v,vi, arg;
+		labeled.v ||= {}, l = (labeled.addr ||= []).length;
+		
+		if (typeof block === 'string') {
+			labeled.addr[l] = ''+l;
+			return block;
+		}
+		
+		const masks = [ Strings.re, Strings.str, Strings.evl ],
+				{ label, registers, inner } = Strings.parseInner(block.inner, block.captor === Strings.evl);
+		let i,i0,l0, args, v,vi, arg;
+		//hi(Strings.dup.mask(block.l.input.substring(0,block.l.index), ...Strings.locate(block.l.input, masks).data).unmasked?.[0]);
+		
+		labeled.addr[l] = label || ''+l;
 		
 		switch (block.captor) {
 			
 			case Strings.evl:
-			v = (new Function('labeld', inner))(labeld);
+			v = (new Function('labeled', inner))(labeled.v);
 			break;
 			
-			case Strings.amp:
+			case Strings.fnc:
 			
-			args = Strings.getArgs(inner, labeld, str.locate(inner), evl.locate(inner)),
+			args = Strings.getArgs(inner, labeled, ...Strings.locate(inner, masks).data),
 			
 			v = {
-				from: args[0],
-				to: args[1],
-				value: args[2],
 				methods: [
-					{ name: 'padStart', args: [ args?.[3] ?? -1, args?.[4] ?? undefined ] },
-					{ name: 'padEnd', args: [ args?.[5] ?? -1, args?.[6] ?? undefined ] }
+					{ value: args[0], name: args[1], args: args.slice(2) }
 				]
 			};
 			
 			break;
 			
+			case Strings.amp:
+			
+			args = Strings.getArgs(inner, labeled, ...Strings.locate(inner, masks).data),
+			
+			v = { from: args[0], to: args[1], value: args[2] },
+			args.length > 3 && (
+				v.methods = [
+					{
+						name: (args[3] = args?.[3] ?? 0) > 0 ? 'padStart' : 'padEnd',
+						args: [ Math.abs(args[3]), args?.[4] ?? undefined ]
+					}
+				]
+			);
+			
+			break;
+			
 			case Strings.frk:
-			i = vi = -1,
-			l = (args = Strings.or.split(inner, str.locate(inner), evl.locate(inner), frk.locate(inner))).length, v = [];
+			i = vi = -1, masks[masks.length] = Strings.frk,
+			l = (args = Strings.or.split(inner, ...Strings.locate(inner, masks).data)).length, v = [];
 			while (++i < l) {
-				i0 = -1, l0 = (arg = Strings.get(args[i]))?.length ?? 0;
+				i0 = -1, l0 = (arg = Strings.get(args[i], labeled))?.length ?? 0;
 				while (++i0 < l0) v[++vi] = arg[i0];
 			}
 			break;
 			
 			case Strings.re:
-			v = labeld[v] ?? '';
+			v = (v = labeled.addr.indexOf(inner)) === -1 ? '' : inner[0] === this.reFlag ? -v|0 : v;
 			break;
 			
 			case Strings.dom:
-			args = Strings.getArgs(inner, labeld, str.locate(inner), evl.locate(inner)),
+			args = Strings.getArgs(inner, labeled, ...Strings.locate(inner, masks).data),
 			v = {
 				selector: args?.[0],
 				propertyName: args?.[1]
@@ -648,49 +729,54 @@ export class Strings {
 			
 		}
 		
-		return label ? (labeld[label] = v) : v;
+		label && (labeled.v[label] = v);
+		
+		return registers ? { neglect: v } : v;
 		
 	}
 	static parseInner(inner, unlabels) {
 		
-		const	str = Strings.str,
-				locs = str.locate(inner),
-				label = unlabels || Strings.lbl.mask(inner, locs).unmasked?.[0];
+		const	{ str, evl } = Strings,
+				sLocs = str.locate(inner),
+				eLocs = evl.locate(inner),
+				label = unlabels || Strings.lbl.mask(inner, sLocs, eLocs).unmasked?.[0],
+				labeled = label && !unlabels;
 		
 		return {
 				label: label && label[1],
-				strLocs: label && !unlabels ? str.locate(inner = inner.substring(label.index + label[0].length)) : locs,
+				registers: label?.[2] === ';',
+				strLocs: labeled ? str.locate(inner = inner.substring(label.index + label[0].length)) : sLocs,
+				evlLocs: labeled ? evl.locate(inner) : eLocs,
 				inner
 			};
 		
 	}
-	static getArgs(str, labeld, ...locs) {
+	static getArgs(str, labeled, ...locs) {
 		
 		const args = Strings.cmm.split(str, ...locs), l = args.length;
 		let i;
 		
 		i = -1;
-		while (++i < l) args[i] = Strings.settle(args[i], labeld);
+		while (++i < l) args[i] = Strings.settle(args[i], labeled);
 		
 		return args;
 		
 	}
-	static settle(str, labeld) {
+	static settle(str, labeled) {
 		
 		let matched;
 		
 		return	(matched = str.match(Strings.num)) ? +matched[1] :
 						(matched = str.match(Strings.stx)) ? matched[1] :
-						(labeld && typeof labeld === 'object' && (matched = str.match(Strings.lv))) ?
-							labeld?.[matched[1]] ?? undefined : undefined;
+							(matched = str.match(Strings.evx)) ? (new Function('labeled', matched[1]))(labeled) :
+								(labeled && typeof labeled === 'object' && (matched = str.match(Strings.idt))) ?
+									labeled?.[matched[1]] ?? undefined : undefined;
 		
 	}
 	
 }
 
 export class Composer {
-	
-	constructor() {}
 	
 	// 第一引数 array の要素を第二引数 values に追加するだけの関数。
 	// 同様の処理は JavaScript のネイティブの機能を用いてよりエコノミーに実現できるが、
@@ -731,22 +817,26 @@ export class Composer {
 	// 第二引数に指定された配列の要素に対して行なう。
 	// values の中の要素は文字列であることが暗黙的に求められる。
 	// 記述子は Object で、以下のプロパティを指定できる。
-	//		value
-	//			実行対象。未指定であれば values に与えられた対象の値になる。
+	//		value (optional)
+	//			実行対象。未指定であれば values に与えられた対象の値になる。後続の記述子の target が未指定ないし nullish だった場合、
+	//			直近の有効な target の値を引き継いで処理が行なわれる。
 	// 	name
 	//			処理される要素が持つメソッド名。例えば要素が文字列なら、String のメソッドなどが指定できる。
 	// 	args (optional)
 	// 		name が示すメソッドに渡される引数を列挙した配列。
 	// 上記記述子の指定内容は、name が示すメソッドに apply を通して反映される。
+	// メソッドの戻り値は values に追加されると同時に、後続のメソッドの実行対象にもなる。これは連続した文字列操作を想定した仕様。
+	// target が true の場合、戻り値ではなく、直近の実行対象が再利用される。
 	static applyAll(apps, values = []) {
 		
 		const l = values.length, l0 = apps.length;
-		let i,i0, app;
+		//lv = lastValue, ls = lastScope
+		let i,i0, app,v,lv,ls;
 		
 		i = -1;
 		while (++i < l) {
-			i0 = -1;
-			while (++i0 < l0) values[i] = ((app = apps[i0]).target = app?.target ?? values[i])?.[app.name]?.apply(app.target, app?.args);
+			i0 = -1, lv = ls = null;
+			while (++i0 < l0) values[i] = lv = (ls = v = ((v = (app = apps[i0])?.value) === true ? ls || lv : v) ?? lv ?? values[i])?.[app.name]?.apply(v, app?.args);
 		}
 		
 		return values;
@@ -771,10 +861,10 @@ export class Composer {
 	// 第一引数 targets に指定された要素を第二引数 values の対応する位置の要素と結合する。
 	// targets の要素数が values よりも多い場合（これはこの関数が想定している唯一の状況だが）、
 	// 現在の要素の位置が values の要素数を超過した時点で、values の要素位置は 0 に戻り、targets の後続の要素との結合を続行する。
-	// makeEven([ 'a', 'b', 'c' ], [ 'b' ]) であれば戻り値は [ 'ab', 'bb', 'cb' ] である。
+	// every([ 'a', 'b', 'c' ], [ 'b' ]) であれば戻り値は [ 'ab', 'bb', 'cb' ] である。
 	// 内部処理以外の状況での使用は一切想定していないため、例えば targets.length / values.length で余りが出る場合、
 	// 出力結果は期待とはかなり異なるものになると思われる。
-	static makeEven(targets, values) {
+	static every(targets, values) {
 		
 		const l = targets.length, l0 = values.length;
 		let i;
@@ -802,13 +892,13 @@ export class Composer {
 	// 第二記述子の時点では二つ間隔で周期していたのが、第三記述子で四つ周期に戻されるため、文字列の組み合わせが網羅的でなくなっている。
 	// これはつまり、数値が示す記述子が生成した要素数と、その数値時点での合成された文字列の総数が一致しているかそれ以下で、かつ割り切れる必要があると言うことである。
 	// そしてなによりもその二つの状況以外を現状の実装は想定していない。
-	// この処理は makeEven を通じて行なわれるため、具体的な実装については同メソッドの説明を参照できる。
+	// この処理は every を通じて行なわれるため、具体的な実装については同メソッドの説明を参照できる。
 	// 想定している処理内容そのものは既存の値の流用以上のものではないが、
 	// 使用しなければならない状況は残念ながら比較的多いと思われ、実装がピーキーである点に留意が必要である。
 	static compose(parts) {
 		
 		const	l = (Array.isArray(parts) ? parts : (parts = [ parts ])).length, URLs = [], values = [], snapshots = [];
-		let i,i0,l0, p, nodes,propertyName, urls = [];
+		let i,i0,l0, p, nodes,propertyName, composed = [], neglects;
 		
 		i = -1;
 		while (++i < l) {
@@ -818,6 +908,14 @@ export class Composer {
 				case 'object':
 				
 				if (!p) continue;
+				
+				if (neglects = 'neglect' in p) {
+					
+					values.push(...Composer.compose([ p.neglect ]));
+					
+					break;
+					
+				}
 				
 				if (Array.isArray(p)) {
 					
@@ -841,9 +939,18 @@ export class Composer {
 				
 				case 'number':
 				
-				Array.isArray(p = snapshots[p]) && Composer.makeEven(urls, p);
+				if (!Array.isArray(p = snapshots[(i0 = (p = p|0) < 0) ? p * -1 : p])) continue;
 				
-				continue;
+				if (i0) {
+					
+					Composer.every(composed, p);
+					continue;
+					
+				}
+				
+				values.push(...p);
+				
+				break;;
 				
 				default: values[0] = p;
 				
@@ -851,11 +958,10 @@ export class Composer {
 			
 			snapshots[i] = [ ...values ],
 			
-			urls = Composer.mix(urls, values), values.length = 0;
-			
+			neglects || (composed = Composer.mix(composed, values)), values.length = 0, neglects = null;
 		}
 		
-		return urls;
+		return composed;
 		
 	}
 	
@@ -878,8 +984,13 @@ export class Composer {
 		const l = (Array.isArray(values) ? values : (values = [ values ])).length;
 		let i, i0 = (Array.isArray(container) ? container : (container = [])).length - 1;
 		
-		i = -1;
-		while (++i < l) container[++i0] = str + values[i];
+		if (l) {
+			
+			i = -1;
+			while (++i < l) container[++i0] = str + values[i];
+			
+		} else container[++i0] = str;
+		
 		
 		return container;
 		
