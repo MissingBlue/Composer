@@ -348,7 +348,7 @@ export class Brackets {
 			(sub = str.substring(cursor, max((loc = locs[i]).lo, 0))) && (result[++i0] = sub);
 			if (min(cursor = (result[++i0] = loc).ro, sl) === sl) break;;
 		}
-		cursor < sl && (result[++i0] = str.substring(cursor));
+		cursor <= sl && (result[++i0] = str.substring(cursor));
 		
 		return result;
 		
@@ -455,10 +455,8 @@ export class Brackets {
 }
 
 // todo:
-// 	<...> で、属性やstyle、dataset へのアクセス方法など。
 // 	(...) の再帰をほぼ検証していないため動作確認。
-// 	構文の繰り返し。（正規表現の {n} のような）
-// 	dom で外部 HTML を読み込み。（これは無理？）
+// 	dom で外部 HTML を読み込み。（多分無理）
 //
 // 構文に基づいて文字列を生成する。
 // 構文にエラーハンドリング等は一切実装しておらず、堅牢性はない。
@@ -473,9 +471,15 @@ export class Brackets {
 // 	左から順に 開始値,終了値,増加値,字詰め文字,桁数(正の値の場合先頭方向、負の値の場合末尾方向へ字詰めする) を記す。
 // 	開始値、終了値には文字列も指定できる。その場合、増加値は開始値のコードポイントに加算される。
 // 	例えば ['a','c',1] は 'a' 'b' 'c' を生成する。
+// 	終了値が開始値より小さい場合、値は負の方向へ進行する。
+// 	増加値は負の値を受け付けるが、値は常に自然数に変換される。
+// 	一方で、負の値を指定した場合、仮に出力の末尾が増加値を超えた場合、通常だとその値は出力に含まれないが、末尾を常に終了値で補完する。
+// 	この構文は Composer.increase の短絡表現のため、より詳細な説明が必要な場合は同メソッドのコメントを参照できる。
 // <...>
-// 	スクリプトの実行スコープが属するドキュメントから、セレクターに一致するすべての要素の、指定したプロパティの値で文字列を生成する。
+// 	スクリプトの実行スコープが属するドキュメントから、セレクターに一致するすべての要素の、指定した属性ないしプロパティの値で文字列を生成する。
 // 	<'セレクター', '属性名'> で実行する。属性名を省略した場合、選択要素の textContent に置き換わる。
+// 	属性名の先頭に . を付けると、属性名ではなくプロパティ名として認識する。
+// 	ネストするプロパティを参照する時は '.dataset.dummy' のようにそれぞれの名前の前に . を置く。
 // (...)
 // 	括弧内のコンマで区切られた値で分岐させる。値間は | で区切る。
 // 	この中の値は、Strings.get を再帰して処理される。
@@ -512,14 +516,21 @@ export class Brackets {
 // 	値間を , で区切り、最初の値を実行主体、次の値(文字列)を(JavaScript APIの)メソッド名、以降をそのメソッドの引数として、指定のメソッドを実行する。
 // 	直接値を指定する場合、数値か文字列しか指定できないが、他の構文、例えば `...` と組み合わせることで間接的に任意の値を指定できる。
 // 	値にはラベルを変数的に指定でき、その際はラベルの文字列を * で囲む必要はない。
-// 	ただし、この場合、指定するラベルは JavaScript の識別子が定める命名規則に従っていなければならない。
+// 	ただし、この場合、指定するラベルは JavaScript の識別子と同じ命名規則に従っていなければならない。
 // 	https://developer.mozilla.org/ja/docs/Glossary/Identifier
+// ^...^
+// 	直後の構文ないし文字列を指定に従って繰り返す。
+// 	指定は 繰り返し回数、繰り返し文字列間の区切り文字 の順で , で区切って行なう。
+// 	この構文そのものは出力された文字列には一切反映されない。例えば文字列の末尾にこの構文が存在しても、この構文は文字列に何の影響も与えない。
+// 	Strings.get("^3^a") // aaa
+// 	この構文は他の構文と比べて若干特殊で、他のすべての構文に先行して、かつ独立して判定および処理が行なわれる。
+// 	また指定次第で容易に巨大な出力を生成する点に注意が必要。（そしてリソース不足エラーにより思ったより巨大なデータを得られない点にも気付くかもしれない）
 //
 // エスケープも含め、上記の構文文字は任意の文字に変更しようと思えばできなくはないが、一切動作検証していないので強く推奨しない。
 
 // 使用例:
 // 	Strings.get("a`return '0'+1;`[label:0,5,1,5,'_',2,'_']<'#id[id=\"sample\"]', 'textContent'>(a|b)*label*");
-export class Strings {
+export default class Strings {
 	
 	static {
 		
@@ -528,20 +539,18 @@ export class Strings {
 				str = this.str = new Brackets("'","'", esc),
 				evl = this.evl = new Brackets('`','`', esc);
 		
-		// fnc = function, dom = document object model, amp = amplifier, frk = fork, lbl = label, re = recycle
-		this.fnc = new Brackets('{','}', esc),
+		// fnc = function, dom = document object model, amp = amplifier, frk = fork, lbl = label, re = recycle, dup = duplicate
 		this.fnc = new Brackets('{','}', esc),
 		this.dom = new Brackets('<','>', esc),
 		this.amp = new Brackets('[',']', esc),
 		this.frk = new Brackets('(',')', esc),
-		//this.lbl = /^(.*?):/;
+		this.dup = new Brackets('^','^', esc),
 		this.lbl = new Chr(/^(.*?)(;|:)/g, undefined, esc),
-		this.dup = new Chr(/\^\s*?(\d+)\s*(?:,((?:.|\s)*?))?$/g, undefined, esc),
 		this.re = new Brackets('*','*', esc),
 		this.reFlag = '/',
 		
 		// dot, cmm = comma, or, num = number, stx = regeXp for STring, evx = regexp for eval,
-		// idt = identify (= labeled value)
+		// idt = identify for labeled value
 		this.dot = new Chr('.', undefined, esc),
 		this.cmm = new Chr(',', undefined, esc),
 		this.or = new Chr('|', undefined, esc),
@@ -556,10 +565,11 @@ export class Strings {
 		this.hierarchy = [
 			str,
 			this.re,
-			this.evl,
+			evl,
 			this.dom,
-			[ this.amp, this.frk ]
+			[ this.amp, this.frk, this.dup ]
 		],
+		this.argHierarchy = [ str, this.re, evl ],
 		
 		this.cache = {};
 		
@@ -591,6 +601,7 @@ export class Strings {
 	// さらに言えばコードの平易化以外を目的としていないが、入力が適切であれば（この関数が持つ目的に対して）汎用的に動作すると思われる。
 	// 当初はネスト後、さらにネストした先の Brackets.locate の結果は、後続の Brackets.locate の引数に含ませないようにするつもりだったが（直系ではないため）、
 	// 非常に複雑な仕組みが必要になりそうなわりに、現状ではそうしたケースに対応する必要がないため、現状のような簡易なものにしている。
+	// （上記は Array.prototype.flat で実現できるかもしれない）
 	// 今の仕様でこうした状況に対応する場合、異なる hierarchy を作成し、個別に実行することで対応が期待できるかもしれない。
 	// 同じように、現状では存在しないが、Brackets.locate 相当のメソッドを持つ Brackets 以外のオブジェクトに対応する必要もあるかもしれない。
 	// 仕組みが仕様と密接に結びついており、コードだけ見ても存在理由が理解し難いため、比較的詳細な説明を記しているが、
@@ -632,11 +643,29 @@ export class Strings {
 		if (v in this.cache) return this.cache[v];
 		
 		const locs = [ ...Strings.locate(v).data ],
+				argHierarchy = Strings.argHierarchy,
 				plot = Brackets.plot(v, ...(locs.splice(Strings.hierarchy.indexOf(Strings.str), 1), locs)),
 				l = plot.length, values = [];
-		let i;
+		let i,i0,l0, v0, p,p0,args;
 		
 		//hi(plot);
+		
+		i = -1, v0 = '';
+		while (++i < l) {
+			
+			(i0 = typeof (p = plot[i]) === 'string') ? (v0 += p) :
+				(i0 = p.captor !== Strings.dup) ? (v0 += v.substring(p.lo, p.ro)) : (i0 = !(p0 = plot[i + 1]));
+			
+			if (i0) continue;
+			
+			i0 = -1, l0 = (args = Strings.getArgs(p.inner, labeled, argHierarchy))[0],
+			typeof p0 === 'string' || (p0 = p0.outer);
+			while (++i0 < l0) values[i0] = p0;
+			v0 += values.join(args?.[1] ?? ''), values.length = 0, ++i;
+			
+		};
+		
+		if (v !== v0) return Strings.get(v0, labeled);
 		
 		i = -1;
 		while (++i < l) values[i] = Strings.parseBlock(plot[i], labeled);
@@ -662,10 +691,9 @@ export class Strings {
 			return block;
 		}
 		
-		const masks = [ Strings.re, Strings.str, Strings.evl ],
+		const hierarchy = [ ...Strings.argHierarchy ],
 				{ label, registers, inner } = Strings.parseInner(block.inner, block.captor === Strings.evl);
 		let i,i0,l0, args, v,vi, arg;
-		//hi(Strings.dup.mask(block.l.input.substring(0,block.l.index), ...Strings.locate(block.l.input, masks).data).unmasked?.[0]);
 		
 		labeled.addr[l] = label || ''+l;
 		
@@ -677,7 +705,7 @@ export class Strings {
 			
 			case Strings.fnc:
 			
-			args = Strings.getArgs(inner, labeled, ...Strings.locate(inner, masks).data),
+			args = Strings.getArgs(inner, labeled, Strings.argHierarchy),
 			
 			v = {
 				methods: [
@@ -689,7 +717,7 @@ export class Strings {
 			
 			case Strings.amp:
 			
-			args = Strings.getArgs(inner, labeled, ...Strings.locate(inner, masks).data),
+			args = Strings.getArgs(inner, labeled, Strings.argHierarchy),
 			
 			v = { from: args[0], to: args[1], value: args[2] },
 			args.length > 3 && (
@@ -704,8 +732,8 @@ export class Strings {
 			break;
 			
 			case Strings.frk:
-			i = vi = -1, masks[masks.length] = Strings.frk,
-			l = (args = Strings.or.split(inner, ...Strings.locate(inner, masks).data)).length, v = [];
+			i = vi = -1, v = [],
+			l = (args = Strings.or.split(inner, ...Strings.locate(inner, [ ...Strings.argHierarchy, Strings.frk ]).data)).length;
 			while (++i < l) {
 				i0 = -1, l0 = (arg = Strings.get(args[i], labeled))?.length ?? 0;
 				while (++i0 < l0) v[++vi] = arg[i0];
@@ -717,10 +745,10 @@ export class Strings {
 			break;
 			
 			case Strings.dom:
-			args = Strings.getArgs(inner, labeled, ...Strings.locate(inner, masks).data),
+			args = Strings.getArgs(inner, labeled, Strings.argHierarchy),
 			v = {
 				selector: args?.[0],
-				propertyName: args?.[1]
+				propertyName: (arg = args?.[1]?.split('.') ?? [ '', 'textContent' ])[0] ? arg[0] : (arg.shift(), arg)
 			};
 			break;
 			
@@ -751,9 +779,9 @@ export class Strings {
 			};
 		
 	}
-	static getArgs(str, labeled, ...locs) {
+	static getArgs(str, labeled, hierarchy) {
 		
-		const args = Strings.cmm.split(str, ...locs), l = args.length;
+		const args = Strings.cmm.split(str, ...Strings.locate(str, hierarchy).data), l = args.length;
 		let i;
 		
 		i = -1;
@@ -801,13 +829,49 @@ export class Composer {
 	// increase('a', 'e', 1) であれば戻り値は [ 'a', 'b', 'c', 'd', 'e' ] である。
 	// from, to いずれの場合も、指定した文字列の最初の一文字目だけが演算の対象となることに注意が必要。
 	// increase('abcd', 'efgh', 1) の戻り値は先の例の戻り値と一致する。
+	// 無限ループ忌避のため、value は常に自然数に変換される。
+	// 一方で value は負の値を受け付け、指定すると出力の末尾は常に to の値に丸められる。
+	// increase(0,3,2) の戻り値は [ 0, 2 ] だが、 increase(0,3,-2) の戻り値は [ 0, 2, 3 ] である。
 	static increase(from = 0, to = 1, value = 1, values = []) {
 		
-		const isNum = typeof from === 'number', code = isNum ? from : from.codePointAt();
-		let i,vl, chr;
+		if (!value) return (values[values.length] = from);
 		
-		i = -1, to = (typeof to === 'number' ? to : to.codePointAt()) - code + 1, vl = values.length - 1;
-		while ((i += value) < to) chr = code + i, values[++vl] = isNum ? chr+'' : String.fromCodePoint(chr);
+		const	isNum = typeof from === 'number' && typeof to === 'number', round = value < 0;
+		let i, vl, v;
+		
+		from = isNum ?	(Number.isNaN(v = from === undefined ? 0 : +from) ? (''+from).codePointAt() : v) :
+							(''+from).codePointAt()
+		to = isNum ?	(Number.isNaN(v = to === undefined ? 1 : +to) ? (''+to).codePointAt() : v) :
+							(''+to).codePointAt(),
+		vl = values.length - 1, value = Math.abs(value);
+		
+		if (from < to) {
+			
+			const l = to - from + value;
+			
+			i = -value;
+			while ((i += value) < l) {
+				if ((v = from + i) > to) {
+					if (!round) break;
+					v = to;
+				}
+				values[++vl] = isNum ? ''+v : String.fromCodePoint(v);
+			}
+			
+		} else {
+			
+			const l = to - from - value;
+			
+			i = value;
+			while ((i -= value) > l) {
+				if ((v = from + i) < to) {
+					if (!round) break;
+					v = to;
+				}
+				values[++vl] = isNum ? ''+v : String.fromCodePoint(v);
+			}
+			
+		}
 		
 		return values;
 		
@@ -846,13 +910,37 @@ export class Composer {
 	// 第一引数 selector に指定した文字列を、document.querySelectorAll の第一引数にし、
 	// 選択されたすべての要素から、第二引数 propertyName に指定したプロパティの値を取得し、
 	// それを第三引数 values に指定した配列に追加する。
-	static select(selector = ':root', propertyName = 'innerHTML', values = []) {
+	static select(selector = ':root', propertyName = [ 'innerHTML' ], values = []) {
 		
-		const nodes = document.querySelectorAll(selector), l = nodes.length;
-		let i, l0;
+		const	nodes = document.querySelectorAll(selector),
+				l = nodes.length,
+				requiresAttr = typeof propertyName === 'string',
+				pl = propertyName?.length;
+		let i,i0, vl, v;
 		
-		i = -1, l0 = values.length - 1;
-		while (++i < l) values[++l0] = nodes[i][propertyName];
+		if (!l || !(requiresAttr || pl)) return values;
+		
+		i = -1, vl = values.length - 1;
+		
+		if (requiresAttr) {
+			
+			while (++i < l) values[++vl] = nodes[i].getAttribute(propertyName) || '';
+			
+		} else if (propertyName[0] === 'style') {
+			
+			while (++i < l) values[++vl] = nodes[i].style.getPropertyValue(propertyName?.[1]) || '';
+		
+		} else {
+		
+			while (++i < l) {
+				
+				i0 = -1, v = nodes[i];
+				while (++i0 < pl && (v = v[propertyName[i0]]) && typeof v === 'object');
+				values[++vl] = v;
+				
+			}
+			
+		}
 		
 		return values;
 		
