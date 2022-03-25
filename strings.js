@@ -24,13 +24,16 @@ export class Indexer {
 		
 		if (!(input in cache)) {
 			
-			const	indices = [], lastIndices = [], cacheData = cache[input] = { indices, lastIndices, matched },
-					l = matched.length, handles = typeof handler === 'function';
+			const	cacheData = cache[input] = { indices: [], lastIndices: [], matched },
+					{ indices, lastIndices } = cacheData, 
+					l = matched.length,
+					handles = typeof handler === 'function';
 			let i,i0, m;
 			
 			i = i0 = -1;
-			while (++i < l) ((m = matched[i]).captor = this, !handles || handler(m, i,l, cacheData)) &&
-				(lastIndices[m.indexed = ++i0] = (indices[i0] = m.index) + m[0].length);
+			while (++i < l)	(m = matched[i]).captor = this,
+									handles && handler(m, i,l, cacheData) &&
+										(lastIndices[m.indexed = ++i0] = (indices[i0] = m.index) + m[0].length);
 			
 		}
 		
@@ -45,7 +48,7 @@ export class Indexer {
 export class Unit extends Indexer {
 	
 	// https://qiita.com/HMMNRST/items/4b10dfb621a469034257#-%E5%90%A6%E5%AE%9A%E5%85%88%E8%AA%AD%E3%81%BF
-	static unit = '(?!)';
+	static unit = /(?!)/g;
 	static option = 'g';
 	// https://developer.mozilla.org/ja/docs/Web/JavaScript/Guide/Regular_Expressions#escaping
 	static escapeRegExpStr(regExpStr) {
@@ -56,7 +59,7 @@ export class Unit extends Indexer {
 		return	rx instanceof RegExp ?
 						rx.global ? rx : new TypeError('RegExp must be global.') :
 						new RegExp(
-									Sequence.escapeRegExpStr('' + (rx || '')),
+									Unit.escapeRegExpStr(''+(rx || '')),
 									typeof option === 'string' ? option + (option.indexOf('g') === -1 ? 'g' : '') : 'g'
 								);
 		
@@ -211,8 +214,6 @@ export class Chr extends Unit {
 	
 	init(unit = Chr.unit, option, seq = Chr.seq, seqOption, seqRepetition) {
 		
-		this.masked instanceof Indexer ? this.masked.clearCache() : (this.masked = new Indexer());
-		
 		if ((this.setUnit(unit, option)).source === this.setSeq(seq, seqOption, seqRepetition).source)
 			new Error('The srouce of "unit" and "seq" must be different.');
 		
@@ -306,6 +307,84 @@ export class Chr extends Unit {
 		
 		return u.source === u0.source && u.flags === u0.flags &&
 			s.source === s0.source && s.flags === s0.flags && s.repetition === s0.repetition;
+	}
+	
+}
+
+export class Term extends Array {
+	
+	static sort(a, b) {
+		return a[0]?.lo === null ? -1 : b[0]?.lo === null ? 1 : a[0].lo - b[0].lo;
+	}
+	static sortTerm(a, b) {
+		return a.lo === null ? -1 : b.lo === null ? 1 : a.lo - b.lo;
+	}
+	
+	constructor(...chrs) {
+		
+		super(...chrs);
+		
+	}
+	
+	mask(str, ...masks) {
+		
+		const	l = this.length, data = [];
+		let i,di, chr;
+		
+		i = di = -1;
+		while (++i < l) (chr = this[i]) instanceof Chr && (data[++di] = chr.mask(str, ...masks));
+		
+		return data;
+		
+	}
+	static get(str, l, r, ...masks) {
+		
+		const lI = l.mask(str, ...masks).unmasked, lL = lI.length, locales = [];
+		
+		if (!lL) return locales;
+		
+		const	isSame = l.isSame(r), rI = isSame ? lI : r.mask(str, ...masks).unmasked, rL = rI.length;
+		
+		if (!rL) return locales;
+		
+		const rShift = isSame ? 2 : 1, localedL = [];
+		let i,i0,mi, L,LI, R,RI, locale;
+		
+		i = -1, mi = -1;
+		while ((i += rShift) < rL) {
+			i0 = lL, RI = (R = rI[i]).index;
+			while (--i0 > -1 && ((L = lI[i0]).index + L[0].length > RI || localedL.indexOf(i0) !== -1));
+			if (i0 > -1) {
+				localedL[++mi] = i0,
+				locale = locales[mi] = { l: L, lo: L.index, li: L.index + L[0].length, r: R, ri: RI, ro: RI + R[0].length },
+				locale.inner = str.substring(locale.li, locale.ri),
+				locale.outer = str.substring(locale.lo, locale.ro);
+			}
+		}
+		
+		return locales;
+		
+	}
+	locate(str, ...masks) {
+		
+		const l = this.length, chrs = this.mask(str, ...masks), cl = chrs.length, terms = [], locales = [];
+		let i,i0,l0, ti,tl, last, li,li0, locale;
+		
+		i = l, ti = -1;
+		while (--i > 0) terms[++ti] = Term.get(str, this[i - 1], this[i], ...masks).sort(Term.sortTerm);
+		
+		terms.sort(Term.sort),
+		
+		i = li = -1, tl = terms[0].length, l0 = ti + 1;
+		while (++i < tl) {
+			if (!(last = terms[0]?.[i])) continue;
+			i0 = li0 = 0, locale = [ last ], last.captor = this;hi(...terms);
+			while (++i0 < l0 && last.ri === (last = locale[++li0] = terms[i0]?.[i])?.lo && (last.captor = this));
+			i0 === l0 && (locales[++li] = locale);
+		}
+		
+		return locales;
+		
 	}
 	
 }
@@ -559,6 +638,13 @@ export default class Strings {
 		this.evx = new RegExp(`^\\s*${evl.l.unit.source}(.*)${evl.r.unit.source}\\s*$`),
 		this.idt = /^\s*([$A-Za-z_\u0080-\uFFFF][$\w\u0080-\uFFFF]*)\s*$/g,
 		
+		// operator scape 仕様上設定しているが、このエスケープはいかなる文字にもマッチしない=エスケープしない
+		this.oesc = new Sequence(/(?!)/g),
+		this.add = new Chr('+', undefined, this.oesc),
+		this.sub = new Chr('-', undefined, this.oesc),
+		this.div = new Chr('/', undefined, this.oesc),
+		this.mul = new Chr('*', undefined, this.oesc),
+		
 		// 実際に使用される主な構文を優先順で列挙したリスト。
 		// 一切検証していないが、使用する構文の可否をこの値の変更だけで任意に行なえるかもしれない。
 		// 例えばセキュアであることが求められる場合、以下の this.evl を消すことで簡易に対応できる。
@@ -592,7 +678,7 @@ export default class Strings {
 	// 戻り値は Brackets.locate の結果を示す Object で、プロパティに data, named を持つ。
 	// data には実行したすべての Brackets.locate の結果を***一切の例外なく機械的に再帰順で***列挙する。
 	// 仮に hierarchy にネストが含まれていても、data 内の要素は並列に列挙される。
-	// named は、hierarchy の Brackets が Object のプロパティとして指定された場合、その OBject のプロパティ name をプロパティ名にして、
+	// named は、hierarchy の Brackets が Object のプロパティとして指定された場合、その Object のプロパティ name をプロパティ名にして、
 	// named の中にプロパティとして設定される。
 	// Strings.locate(str, [ brk0, { target: brk1, name: 'stuff' } ]);
 	// 	// = { data: [ locale0, locale1 ], named: { stuff: locale1 } }
