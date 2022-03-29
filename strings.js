@@ -313,10 +313,10 @@ export class Chr extends Unit {
 
 export class Term extends Array {
 	
-	static sort(a, b) {
-		return a[0]?.lo === null ? -1 : b[0]?.lo === null ? 1 : a[0].lo - b[0].lo;
+	static sortLocs(a, b) {
+		return a?.[0]?.lo === null ? -1 : b?.[0]?.lo === null ? 1 : a?.[0]?.lo - b?.[0]?.lo;
 	}
-	static sortTerm(a, b) {
+	static sortLoc(a, b) {
 		return a.lo === null ? -1 : b.lo === null ? 1 : a.lo - b.lo;
 	}
 	
@@ -326,13 +326,31 @@ export class Term extends Array {
 		
 	}
 	
+	// 第二引数が存在しない時、第一引数はインスタンスのインデックスとしてその位置の要素を返す。
+	// 位置が整数でない場合は、末尾の要素を返す。負の値の場合、末尾からその値分だけ遡った位置の要素を返す。
+	// 要素が Chr でない場合、要素値を引数として新しい Chr を作成し、該当要素もその Chr に置き換える。
+	// 第二引数が存在する時、第一引数が整数でなければ、その値が Chr であればそれを、でなければその値を引数として新しい Chr を作成し、
+	// 第二引数に指定された値に基づいたインスタンスの該当する位置にその Chr を割り当てた上で、戻り値にして返す。
+	// 第一引数が整数の場合、該当する位置の要素を返すが、それが偽を示す場合、第二引数に指定された値を Chr として返し、
+	// またその値を指定された位置の要素に置き換える。いずれの場合も、値が有効かつ Chr でなければ、その値を引数として新しい Chr を作成する。
+	// 第三引数は常に Chr として指定されるべき引数が無効だった時のフォールバックとして（仮にそれが引数として無効な値でも）使われる。
+	// 平たく言えば、第一引数のみを指定した時は getter、第一引数に整数以外の任意の値を指定した時は setter として機能する。
+	chr(a0, a1, fallback) {
+		
+		const gets = arguments[1] === undefined,
+				idx = Number.isInteger(a1 = gets ? a0 : a1) ? a1 > -1 ? a1 : this.length + a1 : this.length - 1;
+		
+		return gets ?	(a0 = this[idx] || a1 || fallback) instanceof Chr ? a0 : (this[idx] = new Chr(a0)) :
+							(this[idx] = (a0 ||= fallback) instanceof Chr ? a0 : new Chr(a0));
+		
+	}
 	mask(str, ...masks) {
 		
 		const	l = this.length, data = [];
 		let i,di, chr;
 		
 		i = di = -1;
-		while (++i < l) (chr = this[i]) instanceof Chr && (data[++di] = chr.mask(str, ...masks));
+		while (++i < l) (chr = this.chr(i)) instanceof Chr && (data[++di] = chr.mask(str, ...masks));
 		
 		return data;
 		
@@ -365,25 +383,124 @@ export class Term extends Array {
 		return locales;
 		
 	}
-	locate(str, ...masks) {
+	locate_(str, ...masks) {
 		
-		const l = this.length, chrs = this.mask(str, ...masks), cl = chrs.length, terms = [], locales = [];
-		let i,i0,l0, ti,tl, last, li,li0, locale;
+		const	l = this.length, chrs = this.mask(str, ...masks), cl = chrs.length,
+				{ get, sortLoc } = Term,
+				result = { matched: [], unmatched: [] },
+				{ matched, unmatched } = result,
+				term = [];
+		let i,i0,i1, ti,li,ci, mi,umi, ll,loc, ll0,ll1, locs, cc, prev,last, locales;
 		
-		i = l, ti = -1;
-		while (--i > 0) terms[++ti] = Term.get(str, this[i - 1], this[i], ...masks).sort(Term.sortTerm);
+		li = -1, locs = [];
 		
-		terms.sort(Term.sort),
-		
-		i = li = -1, tl = terms[0].length, l0 = ti + 1;
-		while (++i < tl) {
-			if (!(last = terms[0]?.[i])) continue;
-			i0 = li0 = 0, locale = [ last ], last.captor = this;hi(...terms);
-			while (++i0 < l0 && last.ri === (last = locale[++li0] = terms[i0]?.[i])?.lo && (last.captor = this));
-			i0 === l0 && (locales[++li] = locale);
+		if ((i = l) > 1) {
+			while (--i > 0) locs[++li] = get(str, prev = this.chr(i - 1), last || this.chr(i), ...masks), last = prev;
+			(locs = locs.flat(1)).sort(Term.sortLoc);
 		}
 		
-		return locales;
+		i = mi = umi = -1, ci = -1, ll = locs.length;
+		while (++i < ll) {
+			
+			if (!i) {
+				last = (term[ti = term.length = 0] = locs.splice(i, 1)[0]).ri,
+				cc = this[ci = this.indexOf(term[ti].r.captor)], --ll;
+				if (i === ll) break;
+			}
+			
+			if (!(loc = locs[i]) || cc !== loc.l.captor || last !== loc.lo) {
+				
+				if (i === ll - 1) {
+					
+					unmatched[++umi] = { locales: [ ...term ] }, i = ci = -1;
+					
+				}
+				
+				continue;
+				
+			}
+			
+			last = (term[++ti] = locs.splice(i--, 1)[0]).ri, cc = this[++ci], --ll;
+			
+			if (ti === l / 2|0 - 1) {
+				
+				matched[++mi] = { locales: [ ...term ] }, i = ci = -1;
+				
+			} else if (ll && i === ll - 1) {
+				
+				unmatched[++umi] = { locales: [ ...term ] }, i = ci = -1;
+				
+			};
+			
+		}
+		
+		//term.length && (unmatched[++umi] = { locales: term }),
+		ll && (unmatched[++umi] = { locales: locs });
+		
+		return result;
+	}
+	locate(str, ...masks) {
+		
+		const	l = this.length, chrs = this.mask(str, ...masks), cl = chrs.length,
+				{ get, sortLoc } = Term,
+				result = { completed: [], incomplete: [] },
+				{ completed, incomplete } = result;
+		let	i,i0, li,ci, cli,icli, ll, locs,loc,loc0, prev,last,
+				currentChr, locales,inners,outers,splitted, term;
+		
+		locs = [];
+		
+		if ((i = l) > 1) {
+			ll = -1;
+			while (--i > 0) locs[++ll] = get(str, prev = this.chr(i - 1), last || this.chr(i), ...masks), last = prev;
+			(locs = locs.flat(1)).sort(Term.sortLoc);
+		}
+		
+		// 上記ブロック内の locs.flat で locs の長さは予測不能になっているので、この ll は、プロパティ length を通じて取得するのが合理的。
+		i = cli = icli = -1, ci = -1, ll = locs.length;
+		while (++i < ll) {
+			
+			if (!i) {
+				
+				last = ((locales = [ loc0 = locs.splice(i, 1)[0] ])[li = 0]).ri,
+				inners = [ loc0.inner ], splitted = [ loc0.l, loc0.inner, loc0.r ], outers = [ loc0.outer ],
+				term = { locales, inners, outers, splitted },
+				currentChr = this[ci = this.indexOf(loc0.r.captor)];
+				
+				if (i === --ll) {
+					incomplete[++icli] = term;
+					break;
+				}
+				
+			}
+			
+			if (!(loc = locs[i]) || currentChr !== loc.l.captor || last !== loc.lo) {
+				
+				i === ll - 1 && (incomplete[++icli] = term, i = -1);
+				
+				continue;
+				
+			}
+			
+			last = (locales[++li] = loc0 = locs.splice(i--, 1)[0]).ri,
+			inners[li] = splitted[splitted.length] = loc0.inner,
+			splitted[splitted.length] = loc0.r,
+			outers[li] = loc0.outer,
+			currentChr = this[++ci], --ll;
+			
+			if (li === (l / 2|0)) {
+				
+				completed[++cli] = term, i = -1;
+				
+			} else if (ll && i === ll - 1) {
+				
+				incomplete[++icli] = term, i = -1;
+				
+			};
+			
+		}
+		
+		return result;
 		
 	}
 	
