@@ -311,21 +311,128 @@ export class Chr extends Unit {
 	
 }
 
+// Brackets の置き換えを意図したオブジェクト。
+// Array を継承し、自身の要素として設定された任意の数の Chr を通じて、文字列の位置の特定に関する処理を行なうメソッドを提供する。
+// 仕様の大部分は Brackets の流用。
 export class Term extends Array {
 	
+	static escSeq = '\\';
 	static sortLocs(a, b) {
 		return a?.[0]?.lo === null ? -1 : b?.[0]?.lo === null ? 1 : a?.[0]?.lo - b?.[0]?.lo;
 	}
 	static sortLoc(a, b) {
 		return a.lo === null ? -1 : b.lo === null ? 1 : a.lo - b.lo;
 	}
-	
-	constructor(...chrs) {
+	// 第一引数 str の中から、第二引数 l と第三引数 r の間にある文字列を特定し、その位置など、それに関する情報を返す。
+	// この Term.prototype.locate の戻り値を任意の数だけ第四引数 masks 以降に指定すると、
+	// l ないし r の位置が masks が示す位置範囲に一致する時は、その l,r の情報を戻り値に含めない。
+	static get(str, l, r, ...masks) {
 		
-		super(...chrs);
+		l || (l = r, r = null);
+		
+		const lI = l.mask(str, ...masks).unmasked, lL = lI.length, locales = [];
+		
+		if (!lL) return locales;
+		
+		const	isSame = r && l.isSame(r), rI = isSame ? lI : (r || l).mask(str, ...masks).unmasked, rL = rI.length;
+		
+		if (!rL) return locales;
+		
+		const rShift = isSame ? 2 : 1, localedL = [];
+		let i,i0,mi, L,LI, R,RI, locale;
+		
+		i = -1, mi = -1;
+		while ((i += rShift) < rL) {
+			i0 = lL, RI = (R = rI[i]).index + (r ? 0: R[0].length);
+			while (--i0 > -1 && ((L = lI[i0]).index + L[0].length > RI || localedL.indexOf(i0) !== -1));
+			if (i0 > -1) {
+				localedL[++mi] = i0,
+				locale = locales[mi] = { l: L, lo: L.index, li: L.index + L[0].length, r: r ? R : R.index, ri: RI, ro: r ? RI + R[0].length : RI },
+				locale.inner = str.substring(locale.li, locale.ri),
+				locale.outer = str.substring(locale.lo, locale.ro);
+			}
+		}
+		
+		return locales;
+		
+	}
+	// 第一引数 str を、任意の数指定された第二引数以降の値に基づき配列化する。
+	// 各 data の示す位置の範囲内にある文字列は、その位置情報と内容を示す Object になり、範囲外はそのまま文字列として列挙される。
+	// 第二引数以降には Term.prototype.locate の戻り値のプロパティ complted に相当する値を指定する。
+	static plot(str, ...data) {
+		
+		if (!(str += '')) return [ str ];
+		
+		const dl = data.length;
+		
+		if (!dl) return [ str ];
+		
+		const locs = [];
+		let i,i0,l0,li, datum;
+		
+		i = li = -1;
+		while (++i < dl) {
+			i0 = -1, l0 = (datum = data[i]).length;
+			while (++i0 < l0) locs[++li] = datum[i0];
+		}
+		
+		if (!++li) return [ str ];
+		
+		const sl = str.length - 1, result = [], max = Math.max, min = Math.min;
+		let loc,sub,cursor;
+		
+		i = i0 = -1, cursor = 0, locs.sort(Term.sortLoc);
+		while (++i < li) {
+			cursor < (loc = locs[i]).lo &&
+				(sub = str.substring(cursor, max((loc = locs[i]).lo, 0))) && (result[++i0] = sub);
+			if (min(cursor = (result[++i0] = loc).ro, sl) === sl) break;;
+		}
+		cursor <= sl && (result[++i0] = str.substring(cursor));
+		
+		return result;
+		
+	}
+	// 第一引数 locales に指定された文字列の位置情報を階層化する。
+	// 位置情報は Term.prototype.locate の戻り値のプロパティ completed 相当でなければならない。
+	// 階層化、つまり位置情報がネストする際、第二引数 callback に関数が指定されていればそれを実行する。
+	// 関数には引数として位置情報、その位置情報が列挙されている配列内の番号、配列の長さ、そして第三引数以降に与えられた args が与えられる。
+	// 関数の戻り値が真を示す場合、その位置情報は下位のものも含め、戻り値に含まれない。
+	static nest(locales, callback, ...args) {
+		
+		const	locs = [ ...locales ], l = locs.length, data = [], nested = [],
+				hasCallback = typeof callback === 'function',
+				nest = Term.nest;
+		let i,i0,di,ni, loc, datum, cancels;
+		hi(locales);
+		i = di = -1, locs.sort(Term.sortLocs);
+		while (++i < l) {
+			
+			i0 = i, ni = -1, datum = { ...(loc = locs[i]) },
+			cancels = hasCallback && callback(loc, i,l, locs, ...args);
+			while (++i0 < l && locs[i0].ri < loc.ri) nested[++ni] = locs[i0];
+			
+			cancels || (data[++di] = datum, ni === -1 || (datum.nested = nest(nested))),
+			ni === -1 || (nested.length = 0), i = i0 - 1;
+			
+		}
+		
+		return data;
 		
 	}
 	
+	constructor(...chrs) {
+		
+		super(...chrs),
+		
+		this.setDefaultEscSeq();
+		
+	}
+	
+	setDefaultEscSeq(seq = Term.escSeq) {
+		
+		this.escSeq = seq;
+		
+	}
 	// 第二引数が存在しない時、第一引数はインスタンスのインデックスとしてその位置の要素を返す。
 	// 位置が整数でない場合は、末尾の要素を返す。負の値の場合、末尾からその値分だけ遡った位置の要素を返す。
 	// 要素が Chr でない場合、要素値を引数として新しい Chr を作成し、該当要素もその Chr に置き換える。
@@ -340,143 +447,212 @@ export class Term extends Array {
 		const gets = arguments[1] === undefined,
 				idx = Number.isInteger(a1 = gets ? a0 : a1) ? a1 > -1 ? a1 : this.length + a1 : this.length - 1;
 		
-		return gets ?	(a0 = this[idx] || a1 || fallback) instanceof Chr ? a0 : (this[idx] = new Chr(a0)) :
-							(this[idx] = (a0 ||= fallback) instanceof Chr ? a0 : new Chr(a0));
+		return gets ?	(
+								a0 = this[idx] || a1 || fallback) instanceof Chr ?
+									a0 :
+									(this[idx] = new Chr(a0, undefined, this.escSeq)
+							) :
+							(
+								this[idx] = (a0 ||= fallback) instanceof Chr ?
+									a0 :
+									new Chr(a0, undefined, this.escSeq)
+							);
 		
 	}
+	
+	// 恐らく不要なメソッド。
+	// Term.get 内部で同等の処理を個別に行なっている。
+	// このメソッドを事前に使えば重複する処理を回避できるかもしれないが、Term.get の汎用性が失われる恐れがある。
 	mask(str, ...masks) {
 		
 		const	l = this.length, data = [];
 		let i,di, chr;
 		
 		i = di = -1;
-		while (++i < l) (chr = this.chr(i)) instanceof Chr && (data[++di] = chr.mask(str, ...masks));
+		while (++i < l) (chr = this.chr(i)) && (data[++di] = chr.mask(str, ...masks));
 		
 		return data;
 		
 	}
-	static get(str, l, r, ...masks) {
-		
-		const lI = l.mask(str, ...masks).unmasked, lL = lI.length, locales = [];
-		
-		if (!lL) return locales;
-		
-		const	isSame = l.isSame(r), rI = isSame ? lI : r.mask(str, ...masks).unmasked, rL = rI.length;
-		
-		if (!rL) return locales;
-		
-		const rShift = isSame ? 2 : 1, localedL = [];
-		let i,i0,mi, L,LI, R,RI, locale;
-		
-		i = -1, mi = -1;
-		while ((i += rShift) < rL) {
-			i0 = lL, RI = (R = rI[i]).index;
-			while (--i0 > -1 && ((L = lI[i0]).index + L[0].length > RI || localedL.indexOf(i0) !== -1));
-			if (i0 > -1) {
-				localedL[++mi] = i0,
-				locale = locales[mi] = { l: L, lo: L.index, li: L.index + L[0].length, r: R, ri: RI, ro: RI + R[0].length },
-				locale.inner = str.substring(locale.li, locale.ri),
-				locale.outer = str.substring(locale.lo, locale.ro);
-			}
-		}
-		
-		return locales;
-		
-	}
-	locate_(str, ...masks) {
-		
-		const	l = this.length, chrs = this.mask(str, ...masks), cl = chrs.length,
-				{ get, sortLoc } = Term,
-				result = { matched: [], unmatched: [] },
-				{ matched, unmatched } = result,
-				term = [];
-		let i,i0,i1, ti,li,ci, mi,umi, ll,loc, ll0,ll1, locs, cc, prev,last, locales;
-		
-		li = -1, locs = [];
-		
-		if ((i = l) > 1) {
-			while (--i > 0) locs[++li] = get(str, prev = this.chr(i - 1), last || this.chr(i), ...masks), last = prev;
-			(locs = locs.flat(1)).sort(Term.sortLoc);
-		}
-		
-		i = mi = umi = -1, ci = -1, ll = locs.length;
-		while (++i < ll) {
-			
-			if (!i) {
-				last = (term[ti = term.length = 0] = locs.splice(i, 1)[0]).ri,
-				cc = this[ci = this.indexOf(term[ti].r.captor)], --ll;
-				if (i === ll) break;
-			}
-			
-			if (!(loc = locs[i]) || cc !== loc.l.captor || last !== loc.lo) {
-				
-				if (i === ll - 1) {
-					
-					unmatched[++umi] = { locales: [ ...term ] }, i = ci = -1;
-					
-				}
-				
-				continue;
-				
-			}
-			
-			last = (term[++ti] = locs.splice(i--, 1)[0]).ri, cc = this[++ci], --ll;
-			
-			if (ti === l / 2|0 - 1) {
-				
-				matched[++mi] = { locales: [ ...term ] }, i = ci = -1;
-				
-			} else if (ll && i === ll - 1) {
-				
-				unmatched[++umi] = { locales: [ ...term ] }, i = ci = -1;
-				
-			};
-			
-		}
-		
-		//term.length && (unmatched[++umi] = { locales: term }),
-		ll && (unmatched[++umi] = { locales: locs });
-		
-		return result;
-	}
+	
+	// 第一引数 str に与えられた文字列から、このオブジェクトのインスタンスの要素が示す Chr に一致する部分を特定し
+	// その各種情報を Object にして返す。
+	// Object には以下のプロパティがある。
+	// 	completed
+	// 		str 内で、すべての要素が連続して一致した部分の位置情報を示す Object を列挙する配列。
+	// 	incomplete
+	// 		str 内で、一部の要素が連続して一致した位置情報を列挙する配列。
+	// 	locale
+	// 		対応するすべての位置情報をシリアライズして列挙した各種配列をプロパティに持つ。この情報を使うケースはもしかしたらないかもしれない。
+	// 		collection
+	// 			全一致か部分一致かを問わず、一致したすべての位置情報をシリアライズして列挙した配列。
+	// 		completed
+	// 			全一致した位置情報をシリアライズして列挙した配列。
+	// 		incomplete
+	// 			部分一致した位置情報をしりあらいずして列挙した配列。
+	// 個々の位置情報を表す Object には String.prototype.matchAll が返す値と、さらにいくつかの独自のプロパティを持つ。
 	locate(str, ...masks) {
 		
-		const	l = this.length, chrs = this.mask(str, ...masks), cl = chrs.length,
+		const	l = this.length,
+				many = l > 1,
+				limiter = l / 2|0,
 				{ get, sortLoc } = Term,
-				result = { completed: [], incomplete: [] },
-				{ completed, incomplete } = result;
-		let	i,i0, li,ci, cli,icli, ll, locs,loc,loc0, prev,last,
+				result = { completed: [], incomplete: [], locale: { completed: [], incomplete: [] } },
+				{ completed, incomplete } = result,
+				rLocs = result.locale,
+				cLocs = rLocs.completed,
+				icLocs = rLocs.incomplete;
+		let	i,i0,l0,l1, li,ci, cli,icli, ll, locs,loc,loc0, prev,last,
 				currentChr, locales,inners,outers,splitted, term;
 		
-		locs = [];
+		ll = -1, locs = [];
 		
-		if ((i = l) > 1) {
-			ll = -1;
-			while (--i > 0) locs[++ll] = get(str, prev = this.chr(i - 1), last || this.chr(i), ...masks), last = prev;
-			(locs = locs.flat(1)).sort(Term.sortLoc);
+		if (i = l) {
+			
+			l0 = many ? 0 : -1;
+			while (--i > l0) {
+				l1 = (loc = get(str, i ? (prev = this.chr(i - 1)) : undefined, last || this.chr(i), ...masks)).length,
+				i0 = -1, last = prev;
+				while (++i0 < l1) locs[++ll] = loc[i0];
+			}
+			rLocs.collection = [ ...locs.sort(Term.sortLoc) ];
+			
 		}
 		
-		// 上記ブロック内の locs.flat で locs の長さは予測不能になっているので、この ll は、プロパティ length を通じて取得するのが合理的。
-		i = cli = icli = -1, ci = -1, ll = locs.length;
+		i = cli = icli = -1, ci = -1, ++ll;
 		while (++i < ll) {
 			
 			if (!i) {
 				
 				last = ((locales = [ loc0 = locs.splice(i, 1)[0] ])[li = 0]).ri,
-				inners = [ loc0.inner ], splitted = [ loc0.l, loc0.inner, loc0.r ], outers = [ loc0.outer ],
-				term = { locales, inners, outers, splitted },
-				currentChr = this[ci = this.indexOf(loc0.r.captor)];
+				inners = [ loc0.inner ],
+				splitted = many ? [ loc0.l, loc0.inner, loc0.r ] : [ loc0.l ],
+				outers = [ loc0.outer ],
+				term = {
+					locales,
+					inners,
+					outers,
+					splitted,
+					lo: loc0.lo,
+					li: loc0.li,
+					ri: loc0.ri,
+					ro: loc0.ro,
+					$: loc0.outer
+				},
+				currentChr = this[ci = this.indexOf(loc0.r.captor)],
+				--ll;
 				
-				if (i === --ll) {
-					incomplete[++icli] = term;
+				if (l < 3) {
+					
+					completed[++cli] = term, cLocs.push(...locales), --i;
+					continue;
+					
+				} else if (i === ll) {
+					
+					incomplete[++icli] = term, icLocs.push(...locales);
 					break;
+					
 				}
 				
 			}
 			
 			if (!(loc = locs[i]) || currentChr !== loc.l.captor || last !== loc.lo) {
 				
-				i === ll - 1 && (incomplete[++icli] = term, i = -1);
+				i === ll - 1 && (
+						incomplete[++icli] = term,
+						icLocs.push(...locales),
+						term.ri = loc.ri,
+						term.ro = loc.ro,
+						term.$ += loc.inner + loc.r[0],
+						i = -1
+					);
+				
+				continue;
+				
+			}
+			
+			last = (locales[++li] = loc0 = locs.splice(i--, 1)[0]).ri,
+			inners[li] = splitted[splitted.length] = loc0.inner,
+			splitted[splitted.length] = loc0.r,
+			outers[li] = loc0.outer,
+			term.ri = loc0.ri,
+			term.ro = loc0.ro,
+			term.$ += loc0.inner + loc0.r[0], 
+			currentChr = this[++ci], --ll;
+			
+			if (li === limiter) {
+				
+				completed[++cli] = term, cLocs.push(...locales), i = -1;
+				
+			} else if (ll && i === ll - 1) {
+				
+				incomplete[++icli] = term, icLocs.push(...locales), i = -1;
+				
+			};
+			
+		}
+		
+		return result;
+		
+	}
+	locate_(str, ...masks) {
+		
+		const	l = this.length,
+				many = l > 1,
+				limiter = l / 2|0,
+				{ get, sortLoc } = Term,
+				result = { completed: [], incomplete: [], locale: { completed: [], incomplete: [] } },
+				{ completed, incomplete } = result,
+				rLocs = result.locale,
+				cLocs = rLocs.completed,
+				icLocs = rLocs.incomplete;
+		let	i,i0,l0,l1, li,ci, cli,icli, ll, locs,loc,loc0, prev,last,
+				currentChr, locales,inners,outers,splitted, term;
+		
+		ll = -1, locs = [];
+		
+		if (i = l) {
+			
+			l0 = many ? 0 : -1;
+			while (--i > l0) {
+				l1 = (loc = get(str, i ? (prev = this.chr(i - 1)) : undefined, last || this.chr(i), ...masks)).length,
+				i0 = -1, last = prev;
+				while (++i0 < l1) locs[++ll] = loc[i0];
+			}
+			rLocs.collection = [ ...locs.sort(Term.sortLoc) ];
+			
+		}
+		
+		i = cli = icli = -1, ci = -1, ++ll;
+		while (++i < ll) {
+			
+			if (!i) {
+				
+				last = ((locales = [ loc0 = locs.splice(i, 1)[0] ])[li = 0]).ri,
+				inners = [ loc0.inner ],
+				splitted = many ? [ loc0.l, loc0.inner, loc0.r ] : [ loc0.l ],
+				outers = [ loc0.outer ],
+				term = { locales, inners, outers, splitted },
+				currentChr = this[ci = this.indexOf(loc0.r.captor)],
+				--ll;
+				
+				if (l < 3) {
+					
+					completed[++cli] = term, cLocs.push(...locales), --i;
+					continue;
+					
+				} else if (i === ll) {
+					
+					incomplete[++icli] = term, icLocs.push(...locales);
+					break;
+					
+				}
+				
+			}
+			
+			if (!(loc = locs[i]) || currentChr !== loc.l.captor || last !== loc.lo) {
+				
+				i === ll - 1 && (incomplete[++icli] = term, icLocs.push(...locales), i = -1);
 				
 				continue;
 				
@@ -488,13 +664,13 @@ export class Term extends Array {
 			outers[li] = loc0.outer,
 			currentChr = this[++ci], --ll;
 			
-			if (li === (l / 2|0)) {
+			if (li === limiter) {
 				
-				completed[++cli] = term, i = -1;
+				completed[++cli] = term, cLocs.push(...locales), i = -1;
 				
 			} else if (ll && i === ll - 1) {
 				
-				incomplete[++icli] = term, i = -1;
+				incomplete[++icli] = term, icLocs.push(...locales), i = -1;
 				
 			};
 			
