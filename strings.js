@@ -324,11 +324,14 @@ export class Term extends Array {
 		return a.lo === null ? -1 : b.lo === null ? 1 : a.lo - b.lo;
 	}
 	// 第一引数 str の中から、第二引数 l と第三引数 r の間にある文字列を特定し、その位置など、それに関する情報を返す。
-	// この Term.prototype.locate の戻り値を任意の数だけ第四引数 masks 以降に指定すると、
+	// Term.prototype.locate の戻り値を任意の数だけ第四引数 masks 以降に指定すると、
 	// l ないし r の位置が masks が示す位置範囲に一致する時は、その l,r の情報を戻り値に含めない。
 	static get(str, l, r, ...masks) {
 		
-		l || (l = r, r = null);
+		l || (l = r, r = null),
+		
+		typeof l === 'string' && (l = new Chr(l, undefined, Term.escSeq)),
+		r && typeof r === 'string' && (r = new Chr(r, undefined, Term.escSeq));
 		
 		const lI = l.mask(str, ...masks).unmasked, lL = lI.length, locales = [];
 		
@@ -343,7 +346,7 @@ export class Term extends Array {
 		
 		i = -1, mi = -1;
 		while ((i += rShift) < rL) {
-			i0 = lL, RI = (R = rI[i]).index + (r ? 0: R[0].length);
+			i0 = lL, RI = (R = rI[i]).index + (r ? 0 : R[0].length);
 			while (--i0 > -1 && ((L = lI[i0]).index + L[0].length > RI || localedL.indexOf(i0) !== -1));
 			if (i0 > -1) {
 				localedL[++mi] = i0,
@@ -358,7 +361,7 @@ export class Term extends Array {
 	}
 	// 第一引数 str を、任意の数指定された第二引数以降の値に基づき配列化する。
 	// 各 data の示す位置の範囲内にある文字列は、その位置情報と内容を示す Object になり、範囲外はそのまま文字列として列挙される。
-	// 第二引数以降には Term.prototype.locate の戻り値のプロパティ complted に相当する値を指定する。
+	// 第二引数以降には Term.prototype.locate の戻り値のプロパティ completed に相当する値を指定する。
 	static plot(str, ...data) {
 		
 		if (!(str += '')) return [ str ];
@@ -403,7 +406,7 @@ export class Term extends Array {
 				hasCallback = typeof callback === 'function',
 				nest = Term.nest;
 		let i,i0,di,ni, loc, datum, cancels;
-		hi(locales);
+		
 		i = di = -1, locs.sort(Term.sortLocs);
 		while (++i < l) {
 			
@@ -422,9 +425,11 @@ export class Term extends Array {
 	
 	constructor(...chrs) {
 		
-		super(...chrs),
+		const defaultEscSeq = Array.isArray(chrs[0]) ? chrs[1] : undefined;
 		
-		this.setDefaultEscSeq();
+		super(...(defaultEscSeq ? chrs[0] : chrs)),
+		
+		this.setDefaultEscSeq(defaultEscSeq);
 		
 	}
 	
@@ -460,6 +465,8 @@ export class Term extends Array {
 		
 	}
 	
+	// 第一引数に指定された str の中から、すべての要素の一致を判定し、
+	// 第二引数以降に与えられた masks により、それらの範囲内外で一致部分を区分けた情報を配列に列挙して返す。
 	// 恐らく不要なメソッド。
 	// Term.get 内部で同等の処理を個別に行なっている。
 	// このメソッドを事前に使えば重複する処理を回避できるかもしれないが、Term.get の汎用性が失われる恐れがある。
@@ -537,7 +544,8 @@ export class Term extends Array {
 					li: loc0.li,
 					ri: loc0.ri,
 					ro: loc0.ro,
-					$: loc0.outer
+					$: loc0.outer,
+					captor: this
 				},
 				currentChr = this[ci = this.indexOf(loc0.r.captor)],
 				--ll;
@@ -578,90 +586,6 @@ export class Term extends Array {
 			term.ri = loc0.ri,
 			term.ro = loc0.ro,
 			term.$ += loc0.inner + loc0.r[0], 
-			currentChr = this[++ci], --ll;
-			
-			if (li === limiter) {
-				
-				completed[++cli] = term, cLocs.push(...locales), i = -1;
-				
-			} else if (ll && i === ll - 1) {
-				
-				incomplete[++icli] = term, icLocs.push(...locales), i = -1;
-				
-			};
-			
-		}
-		
-		return result;
-		
-	}
-	locate_(str, ...masks) {
-		
-		const	l = this.length,
-				many = l > 1,
-				limiter = l / 2|0,
-				{ get, sortLoc } = Term,
-				result = { completed: [], incomplete: [], locale: { completed: [], incomplete: [] } },
-				{ completed, incomplete } = result,
-				rLocs = result.locale,
-				cLocs = rLocs.completed,
-				icLocs = rLocs.incomplete;
-		let	i,i0,l0,l1, li,ci, cli,icli, ll, locs,loc,loc0, prev,last,
-				currentChr, locales,inners,outers,splitted, term;
-		
-		ll = -1, locs = [];
-		
-		if (i = l) {
-			
-			l0 = many ? 0 : -1;
-			while (--i > l0) {
-				l1 = (loc = get(str, i ? (prev = this.chr(i - 1)) : undefined, last || this.chr(i), ...masks)).length,
-				i0 = -1, last = prev;
-				while (++i0 < l1) locs[++ll] = loc[i0];
-			}
-			rLocs.collection = [ ...locs.sort(Term.sortLoc) ];
-			
-		}
-		
-		i = cli = icli = -1, ci = -1, ++ll;
-		while (++i < ll) {
-			
-			if (!i) {
-				
-				last = ((locales = [ loc0 = locs.splice(i, 1)[0] ])[li = 0]).ri,
-				inners = [ loc0.inner ],
-				splitted = many ? [ loc0.l, loc0.inner, loc0.r ] : [ loc0.l ],
-				outers = [ loc0.outer ],
-				term = { locales, inners, outers, splitted },
-				currentChr = this[ci = this.indexOf(loc0.r.captor)],
-				--ll;
-				
-				if (l < 3) {
-					
-					completed[++cli] = term, cLocs.push(...locales), --i;
-					continue;
-					
-				} else if (i === ll) {
-					
-					incomplete[++icli] = term, icLocs.push(...locales);
-					break;
-					
-				}
-				
-			}
-			
-			if (!(loc = locs[i]) || currentChr !== loc.l.captor || last !== loc.lo) {
-				
-				i === ll - 1 && (incomplete[++icli] = term, icLocs.push(...locales), i = -1);
-				
-				continue;
-				
-			}
-			
-			last = (locales[++li] = loc0 = locs.splice(i--, 1)[0]).ri,
-			inners[li] = splitted[splitted.length] = loc0.inner,
-			splitted[splitted.length] = loc0.r,
-			outers[li] = loc0.outer,
 			currentChr = this[++ci], --ll;
 			
 			if (li === limiter) {
@@ -826,9 +750,316 @@ export class Brackets {
 	
 }
 
+// Array を継承し、Term を要素に持つ。
+// 要素の Term が示す文字列の位置情報を特定するメソッド Terms.prototype.getMasks を提供する。
+// 取得した位置情報は Term.plot などで使用する。
+// ほぼ単機能のオブジェクトだが、構文解析の設定としての役割を果たし得る。
+export class Terms extends Array {
+	
+	constructor(...terms) {
+		
+		super(...terms);
+		
+	}
+	
+	// 以下のコメントの内容はこのオブジェクトの持つ機能が別のオブジェクトの静的メソッドだった時のもので、
+	// 大枠は変わらないが、このオブジェクトおよびそのメソッド getMasks を正確に説明するものではない。
+	// 別に書き起こす必要があるが、現状怠っている。
+	//
+	// 第一引数 str に指定した文字列に、第二引数 hierarchy 内に列挙された Brackets のインスタンスの持つメソッド locate を順に実行し、
+	// その結果を第三引数 result に指定された Object のプロパティに記録して、それを戻り値にする。
+	// result はこのメソッド内での再帰処理用の引数で、通常指定する必要はない。
+	// 各 Brackets の結果は、以下のようにカスケード的に後続の locate の引数に与えられる。
+	// Strings.locate('hi', [ brk0, brk1, brk2 ]);
+	//		...locale0 = brk0.locate(str);
+	// 	...locale1 = brk1.locate(str, locale0);
+	// 	...locale2 = brk2.locate(str, locale0, locale1);
+	// hierarchy 内で配列をネストした場合、ネストされた Brackets.locate は前述のように先行する Brackets.locate の結果を引数として与えられるが、
+	// 以下のように同じネスト内の他の Brackets.locate の結果は引数に加えない。
+	// Strings.locate('hi', [ brk0, [ brk1, brk2 ], brk3 ]);
+	// 	...locale1 = brk1.locate(str, locale0);
+	// 	...locale2 = brk2.locate(str, locale0);
+	// 	...brk3.locate(str, locale0, locale1, locale2);
+	// 戻り値は Brackets.locate の結果を示す Object で、プロパティに data, named を持つ。
+	// data には実行したすべての Brackets.locate の結果を***一切の例外なく機械的に再帰順で***列挙する。
+	// 仮に hierarchy にネストが含まれていても、data 内の要素は並列に列挙される。
+	// named は、hierarchy の Brackets が Object のプロパティとして指定された場合、その Object のプロパティ name をプロパティ名にして、
+	// named の中にプロパティとして設定される。
+	// Strings.locate(str, [ brk0, { target: brk1, name: 'stuff' } ]);
+	// 	// = { data: [ locale0, locale1 ], named: { stuff: locale1 } }
+	// named も、hierarchy のネストを考慮しない。name の重複は後続の結果で上書きされる。
+	// 基本的にはこの関数は内部処理以外で使うことを想定しておらず、
+	// さらに言えばコードの平易化以外を目的としていないが、入力が適切であれば（この関数が持つ目的に対して）汎用的に動作すると思われる。
+	// 当初はネスト後、さらにネストした先の Brackets.locate の結果は、後続の Brackets.locate の引数に含ませないようにするつもりだったが（直系ではないため）、
+	// 非常に複雑な仕組みが必要になりそうなわりに、現状ではそうしたケースに対応する必要がないため、現状のような簡易なものにしている。
+	// （上記は Array.prototype.flat で実現できるかもしれない）
+	// 今の仕様でこうした状況に対応する場合、異なる hierarchy を作成し、個別に実行することで対応が期待できるかもしれない。
+	// 同じように、現状では存在しないが、Brackets.locate 相当のメソッドを持つ Brackets 以外のオブジェクトに対応する必要もあるかもしれない。
+	// 仕組みが仕様と密接に結びついており、コードだけ見ても存在理由が理解し難いため、比較的詳細な説明を記しているが、
+	// 目的そのものは上記の通り単なる可読性の向上のため以上のものではなく、重要性の低い処理を担っている。
+	// 例えば Strings.get 内にある "Brackets.plot(v, ...Strings.locate(v).data.slice(1))" で
+	// 第二引数以下に渡す引数を直接指定することができるのであれば、この関数はまったく必要ない。
+	getMasks(str, ...masks) {
+		
+		const l = this.length, named = {};
+		let i,mi,ml,mi0,ml0,k,i0,l0, term,t0, currentMasks, result,masks0,named0;
+		
+		i = -1, mi = masks.length - 1;
+		while (++i < l) {
+			
+			if ((term = this[i]).constructor === Array) {
+				
+				i0 = -1, l0 = term.length, ml = (currentMasks = [ ...masks ]).length - 1;
+				while (++i0 < l0) {
+					
+					if (!(t0 = (t0 = term[i0]).constructor === Array ? [ t0 ] : t0 && typeof t0 === 'object' && t0)) continue;
+					
+					mi0 = ml, ml0 = (masks0 = (result = new Terms(t0).getMasks(str, ...currentMasks)).masks).length;
+					while (++mi0 < ml0) masks[++mi] = masks0[mi0];
+					
+					named0 = result.named;
+					for (k in named0) named[k] = named0[k];
+					
+				}
+				
+				k = undefined;
+				
+			} else if (term && typeof term === 'object') {
+				
+				masks[++mi] = (term instanceof Term ? term : (k = term?.name, term.target)).locate(str, ...masks).completed,
+				k && (named[k] = hierarchy, k = undefined);
+				
+			}
+			
+		}
+		
+		return { masks, named };
+		
+	}
+	
+}
+
+export default class Strings {
+	
+	static {
+		
+		// esc = escape, str = string
+		const	esc = this.esc = new Sequence('\\'),
+				str = this.str = new Term([ "'", "'" ], esc),
+				evl = this.evl = new Term([ '`', '`' ], esc);
+		
+		// fnc = function, dom = document object model, amp = amplifier, frk = fork, lbl = label, re = recycle, dup = duplicate
+		this.fnc = new Term([ '{', '}' ], esc),
+		this.dom = new Term([ '<', '>' ], esc),
+		this.amp = new Term([ '[', ']' ], esc),
+		this.frk = new Term([ '(', ')' ], esc),
+		this.dup = new Term([ '^', '^' ], esc),
+		this.lbl = new Chr(/^(.*?)(;|:)/g, undefined, esc),
+		this.re = new Term([ '*', '*' ], esc),
+		this.reFlag = '/',
+		
+		// dot, cmm = comma, or, num = number, stx = regeXp for STring, evx = regexp for eval,
+		// idt = identify for labeled value
+		this.dot = new Chr('.', undefined, esc),
+		this.cmm = new Chr(',', undefined, esc),
+		this.or = new Chr('|', undefined, esc),
+		this.num = /^\s*(-?\d+(?:\.\d+)?)\s*$/,
+		this.stx = new RegExp(`^\\s*${str.chr(0).unit.source}(.*)${str.chr(1).unit.source}\\s*$`),
+		this.evx = new RegExp(`^\\s*${evl.chr(0).unit.source}(.*)${evl.chr(1).unit.source}\\s*$`),
+		this.idt = /^\s*([$A-Za-z_\u0080-\uFFFF][$\w\u0080-\uFFFF]*)\s*$/g,
+		
+		// operator scape 仕様上設定しているが、このエスケープはいかなる文字にもマッチしない=エスケープしない
+		this.oesc = new Sequence(/(?!)/g),
+		this.ops = new Chr(/[+\-*/]/g, undefined, this.oesc),
+		this.add = new Chr('+', undefined, this.oesc),
+		this.sub = new Chr('-', undefined, this.oesc),
+		this.div = new Chr('/', undefined, this.oesc),
+		this.mul = new Chr('*', undefined, this.oesc),
+		
+		// 実際に使用される主な構文を優先順で列挙したリスト。
+		// 一切検証していないが、使用する構文の可否をこの値の変更だけで任意に行なえるかもしれない。
+		// 例えばセキュアであることが求められる場合、以下の this.evl を消すことで簡易に対応できる。
+		this.hierarchy = new Terms(
+			str,
+			this.re,
+			evl,
+			[ this.dom, this.amp, this.frk, this.dup ]
+		),
+		this.argHierarchy = new Terms(str, this.re, evl),
+		this.frkArgHierarchy = new Terms(...this.argHierarchy, this.frk),
+		
+		this.cache = {};
+		
+	}
+	
+	static get(v, labeled = {}) {
+		
+		if (v in this.cache) return this.cache[v];
+		
+		const masks = Strings.hierarchy.getMasks(v).masks,
+				plot = Term.plot(v, ...(masks.splice(Strings.hierarchy.indexOf(Strings.str), 1), masks)),
+				l = plot.length, values = [];
+		let i,i0,l0, v0, p,p0,args;
+		
+		//hi(plot);
+		
+		i = -1, v0 = '';
+		while (++i < l) {
+			
+			(i0 = typeof (p = plot[i]) === 'string') ? (v0 += p) :
+				(i0 = p.captor !== Strings.dup) ? (v0 += v.substring(p.lo, p.ro)) : (i0 = !(p0 = plot[i + 1]));
+			
+			if (i0) continue;
+			
+			i0 = -1, l0 = (args = Strings.getArgs(p.inners[0], labeled, Strings.argHierarchy))[0],
+			typeof p0 === 'string' || (p0 = p0.outers);
+			while (++i0 < l0) values[i0] = p0;
+			v0 += values.join(args?.[1] ?? ''), values.length = 0, ++i;
+			
+		};
+		
+		if (v !== v0) return Strings.get(v0, labeled);
+		
+		i = -1;
+		while (++i < l) values[i] = Strings.parseBlock(plot[i], labeled);
+		
+		//hi(...values, labeled);
+		
+		const composed = Composer.compose(values), cl = composed.length;
+		
+		i = -1;
+		while (++i < cl) composed[i] = Strings.esc.replace(composed[i]);
+		
+		return this.cache[v] = composed;
+		
+	}
+	static parseBlock(block, labeled = {}) {
+		
+		let l;
+		
+		labeled.v ||= {}, l = (labeled.addr ||= []).length;
+		
+		if (typeof block === 'string') {
+			labeled.addr[l] = ''+l;
+			return block;
+		}
+		
+		const { label, registers, inner } = Strings.parseInner(block.inners[0], block.captor === Strings.evl);
+		let i,i0,l0, args, v,vi, arg;
+		
+		labeled.addr[l] = label || ''+l;
+		
+		switch (block.captor) {
+			
+			case Strings.evl:
+			v = (new Function('labeled', inner))(labeled.v);
+			break;
+			
+			case Strings.fnc:
+			
+			args = Strings.getArgs(inner, labeled, Strings.argHierarchy),
+			
+			v = {
+				methods: [
+					{ value: args[0], name: args[1], args: args.slice(2) }
+				]
+			};
+			
+			break;
+			
+			case Strings.amp:
+			
+			args = Strings.getArgs(inner, labeled, Strings.argHierarchy),
+			
+			v = { from: args[0], to: args[1], value: args[2] },
+			args.length > 3 && (
+				v.methods = [
+					{
+						name: (args[3] = args?.[3] ?? 0) > 0 ? 'padStart' : 'padEnd',
+						args: [ Math.abs(args[3]), args?.[4] ?? undefined ]
+					}
+				]
+			);
+			
+			break;
+			
+			case Strings.frk:
+			i = vi = -1, v = [],
+			l = (args = Strings.or.split(inner, ...Strings.frkArgHierarchy.getMasks(inner).masks)).length;
+			while (++i < l) {
+				i0 = -1, l0 = (arg = Strings.get(args[i], labeled))?.length ?? 0;
+				while (++i0 < l0) v[++vi] = arg[i0];
+			}
+			break;
+			
+			case Strings.re:
+			v = (v = labeled.addr.indexOf(inner)) === -1 ? '' : inner[0] === this.reFlag ? -v|0 : v;
+			break;
+			
+			case Strings.dom:
+			args = Strings.getArgs(inner, labeled, Strings.argHierarchy),
+			v = {
+				selector: args?.[0],
+				propertyName: (arg = args?.[1]?.split('.') ?? [ '', 'textContent' ])[0] ? arg[0] : (arg.shift(), arg)
+			};
+			break;
+			
+			default:
+			v = inner;
+			
+		}
+		
+		label && (labeled.v[label] = v);
+		
+		return registers ? { neglect: v } : v;
+		
+	}
+	static parseInner(inner, unlabels) {
+		
+		const	{ str, evl } = Strings,
+				sLocs = str.locate(inner).completed,
+				eLocs = evl.locate(inner).completed,
+				label = unlabels || Strings.lbl.mask(inner, sLocs, eLocs).unmasked?.[0],
+				labeled = label && !unlabels;
+		
+		return {
+				label: label && label[1],
+				registers: label?.[2] === ';',
+				strLocs: labeled ? str.locate(inner = inner.substring(label.index + label[0].length)).completed : sLocs,
+				evlLocs: labeled ? evl.locate(inner).completed : eLocs,
+				inner
+			};
+		
+	}
+	static getArgs(str, labeled, hierarchy) {
+		
+		const args = Strings.cmm.split(str, ...hierarchy.getMasks(str).masks), l = args.length;
+		let i;
+		
+		i = -1;
+		while (++i < l) args[i] = Strings.settle(args[i], labeled);
+		
+		return args;
+		
+	}
+	static settle(str, labeled) {
+		
+		let matched;
+		
+		return	(matched = str.match(Strings.num)) ? +matched[1] :
+						(matched = str.match(Strings.stx)) ? matched[1] :
+							(matched = str.match(Strings.evx)) ? (new Function('labeled', matched[1]))(labeled) :
+								(labeled && typeof labeled === 'object' && (matched = str.match(Strings.idt))) ?
+									labeled?.[matched[1]] ?? undefined : undefined;
+		
+	}
+	
+}
+
 // todo:
 // 	(...) の再帰をほぼ検証していないため動作確認。
 // 	dom で外部 HTML を読み込み。（多分無理）
+// 	すべての構文で括弧内接頭辞 / に対応。
 //
 // 構文に基づいて文字列を生成する。
 // 構文にエラーハンドリング等は一切実装しておらず、堅牢性はない。
@@ -902,23 +1133,23 @@ export class Brackets {
 
 // 使用例:
 // 	Strings.get("a`return '0'+1;`[label:0,5,1,5,'_',2,'_']<'#id[id=\"sample\"]', 'textContent'>(a|b)*label*");
-export default class Strings {
+export class _Strings {
 	
 	static {
 		
 		// esc = escape, str = string
 		const	esc = this.esc = new Sequence('\\'),
-				str = this.str = new Brackets("'","'", esc),
-				evl = this.evl = new Brackets('`','`', esc);
+				str = this.str = new Term([ "'", "'" ], esc),
+				evl = this.evl = new Term([ '`', '`' ], esc);
 		
 		// fnc = function, dom = document object model, amp = amplifier, frk = fork, lbl = label, re = recycle, dup = duplicate
-		this.fnc = new Brackets('{','}', esc),
-		this.dom = new Brackets('<','>', esc),
-		this.amp = new Brackets('[',']', esc),
-		this.frk = new Brackets('(',')', esc),
-		this.dup = new Brackets('^','^', esc),
+		this.fnc = new Term([ '{', '}' ], esc),
+		this.dom = new Term([ '<', '>' ], esc),
+		this.amp = new Term([ '[', ']' ], esc),
+		this.frk = new Term([ '(', ')' ], esc),
+		this.dup = new Term([ '^', '^' ], esc),
 		this.lbl = new Chr(/^(.*?)(;|:)/g, undefined, esc),
-		this.re = new Brackets('*','*', esc),
+		this.re = new Term([ '*', '*' ], esc),
 		this.reFlag = '/',
 		
 		// dot, cmm = comma, or, num = number, stx = regeXp for STring, evx = regexp for eval,
@@ -927,12 +1158,13 @@ export default class Strings {
 		this.cmm = new Chr(',', undefined, esc),
 		this.or = new Chr('|', undefined, esc),
 		this.num = /^\s*(-?\d+(?:\.\d+)?)\s*$/,
-		this.stx = new RegExp(`^\\s*${str.l.unit.source}(.*)${str.r.unit.source}\\s*$`),
-		this.evx = new RegExp(`^\\s*${evl.l.unit.source}(.*)${evl.r.unit.source}\\s*$`),
+		this.stx = new RegExp(`^\\s*${str.chr(0).unit.source}(.*)${str.chr(1).unit.source}\\s*$`),
+		this.evx = new RegExp(`^\\s*${evl.chr(0).unit.source}(.*)${evl.chr(1).unit.source}\\s*$`),
 		this.idt = /^\s*([$A-Za-z_\u0080-\uFFFF][$\w\u0080-\uFFFF]*)\s*$/g,
 		
 		// operator scape 仕様上設定しているが、このエスケープはいかなる文字にもマッチしない=エスケープしない
 		this.oesc = new Sequence(/(?!)/g),
+		this.ops = new Chr(/[+\-*/]/g, undefined, this.oesc),
 		this.add = new Chr('+', undefined, this.oesc),
 		this.sub = new Chr('-', undefined, this.oesc),
 		this.div = new Chr('/', undefined, this.oesc),
@@ -945,8 +1177,7 @@ export default class Strings {
 			str,
 			this.re,
 			evl,
-			this.dom,
-			[ this.amp, this.frk, this.dup ]
+			[ this.dom, this.amp, this.frk, this.dup ]
 		],
 		this.argHierarchy = [ str, this.re, evl ],
 		
@@ -991,13 +1222,13 @@ export default class Strings {
 		
 		let i;
 		
-		if (Array.isArray(hierarchy)) {
+		if (hierarchy.constructor === Array) {
 			
 			let l0, data = result.data;
 			const l = hierarchy.length, stored = data, current = [], locate = Strings.locate;
 			
 			i = -1, l0 = stored.length;
-			while (++i < l)	Array.isArray(hierarchy[i]) && (result.data = data = [ ...stored ]),
+			while (++i < l)	hierarchy[i].constructor === Array && (result.data = data = [ ...stored ]),
 									locate(str, hierarchy[i], result),
 									data === stored ?	(l0 = stored.length) :
 															(current.push(...data.slice(l0)), result.data = data = stored);
@@ -1008,7 +1239,7 @@ export default class Strings {
 			const { data, named } = result;
 			
 			hierarchy = data[data.length] =
-				(hierarchy instanceof Brackets ? hierarchy : (i = hierarchy?.name, hierarchy.target)).locate(str, ...data),
+				(hierarchy instanceof Term ? hierarchy : (i = hierarchy?.name, hierarchy.target)).locate(str, ...data).completed,
 			i && (named[i] = hierarchy);
 			
 		}
@@ -1023,7 +1254,7 @@ export default class Strings {
 		
 		const locs = [ ...Strings.locate(v).data ],
 				argHierarchy = Strings.argHierarchy,
-				plot = Brackets.plot(v, ...(locs.splice(Strings.hierarchy.indexOf(Strings.str), 1), locs)),
+				plot = Term.plot(v, ...(locs.splice(Strings.hierarchy.indexOf(Strings.str), 1), locs)),
 				l = plot.length, values = [];
 		let i,i0,l0, v0, p,p0,args;
 		
@@ -1071,7 +1302,7 @@ export default class Strings {
 		}
 		
 		const hierarchy = [ ...Strings.argHierarchy ],
-				{ label, registers, inner } = Strings.parseInner(block.inner, block.captor === Strings.evl);
+				{ label, registers, inner } = Strings.parseInner(block.inners[0], block.captor === Strings.evl);
 		let i,i0,l0, args, v,vi, arg;
 		
 		labeled.addr[l] = label || ''+l;
@@ -1144,16 +1375,16 @@ export default class Strings {
 	static parseInner(inner, unlabels) {
 		
 		const	{ str, evl } = Strings,
-				sLocs = str.locate(inner),
-				eLocs = evl.locate(inner),
+				sLocs = str.locate(inner).completed,
+				eLocs = evl.locate(inner).completed,
 				label = unlabels || Strings.lbl.mask(inner, sLocs, eLocs).unmasked?.[0],
 				labeled = label && !unlabels;
 		
 		return {
 				label: label && label[1],
 				registers: label?.[2] === ';',
-				strLocs: labeled ? str.locate(inner = inner.substring(label.index + label[0].length)) : sLocs,
-				evlLocs: labeled ? evl.locate(inner) : eLocs,
+				strLocs: labeled ? str.locate(inner = inner.substring(label.index + label[0].length)).completed : sLocs,
+				evlLocs: labeled ? evl.locate(inner).completed : eLocs,
 				inner
 			};
 		
@@ -1362,6 +1593,13 @@ export class Composer {
 	// この処理は every を通じて行なわれるため、具体的な実装については同メソッドの説明を参照できる。
 	// 想定している処理内容そのものは既存の値の流用以上のものではないが、
 	// 使用しなければならない状況は残念ながら比較的多いと思われ、実装がピーキーである点に留意が必要である。
+	//
+	// 変更予定:
+	// 記述子の値が数値だった場合は、単にその数値が示す記述子の値で、他の記述子同様に、それまでに生成された文字列毎にすべて合成する。
+	// すべての記述子にプロパティ every が設定でき、それが真を示す値の時は、その記述子が生成する文字列は、それ以前の文字列と順番に結合され、
+	// 数が満たない場合は生成順を 0 に巻き戻して結合を繰り返し、生成文字列がそれまでの文字列の数を超過する場合はそこで結合を終了する。
+	// 例えばそれまでに生成した文字列が 0,1,2 で、every を持つ記述子が 0,1 だった場合、合成された文字列は 00,11,20 になる。
+	// 同じように、every を持つ記述子が 0,1,2,3 を生成する場合、合成される文字列は 00,11,22 になる。
 	static compose(parts) {
 		
 		const	l = (Array.isArray(parts) ? parts : (parts = [ parts ])).length, URLs = [], values = [], snapshots = [];
@@ -1417,7 +1655,7 @@ export class Composer {
 				
 				values.push(...p);
 				
-				break;;
+				break;
 				
 				default: values[0] = p;
 				
@@ -1426,6 +1664,7 @@ export class Composer {
 			snapshots[i] = [ ...values ],
 			
 			neglects || (composed = Composer.mix(composed, values)), values.length = 0, neglects = null;
+			
 		}
 		
 		return composed;
