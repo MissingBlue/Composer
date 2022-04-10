@@ -1,5 +1,5 @@
 # Samples
 	
-	import Strings from './strings.js';
+	import strings from './strings.js';
 	
-	console.log("It's time to talk about Dimension 8:", ...Strings.get("^8,','^[0,1,1]"));
+	console.log("Get into the Dimension 8:", ...strings("^8,','^[0,1,1]"));
