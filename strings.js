@@ -700,6 +700,7 @@ export class Terms extends Array {
 // 	hierarchy
 // 		Term(構文文字)を優先順で列挙した Terms。
 // 	super
+// 		* 記述子を通じて指定できるように変更したため、このオブジェクト自身のコンストラクターで実装される。
 // 		対象文字列内の範囲として認識するが、Term.plot によって要素化されない Term を配列に列挙して指定する。
 // 		文字列など、構文の範囲（スコープ）ではなく、それを構成する値の範囲を示す Term を指定することを想定。
 // 		プロパティ名の super はこの意味では適切ではないかもしれないが、相応しい名前が思いつかなかったため便宜的に使用。
@@ -713,7 +714,51 @@ export class ParseHelper {
 		
 		this.cache = {},
 		
+		this.super = [],
+		
 		this.map = new Map();
+		
+	}
+	
+	setGrammar(grammar, esc) {
+		
+		const l = (Array.isArray(grammar) ? grammar : [ grammar ]).length, map = this.map, terms = new Terms();
+		let i,ti,si, g, term, callback;
+		
+		i = ti = si = -1;
+		while (++i < l) {
+			
+			if (Array.isArray(g = grammar[i])) {
+				
+				terms[++ti] = [ ...this.setGrammar(g, esc) ];
+				
+			} else if (g && typeof g === 'object') {
+				
+				term = terms[++ti] = this[g.name] = new Term(g.term, g?.esc ?? esc),
+				(callback = this.getGrammarCallback(g.callback)) && map.set(term, callback),
+				g.super && (this.super[++si] = term);
+				
+			}
+			
+		}
+		
+		return terms;
+		
+	}
+	getGrammarCallback(descriptor) {
+		
+		let handler, scope, args;
+		
+		typeof descriptor === 'function' ?
+			(handler = descriptor, scope = this) :
+		descriptor && typeof descriptor === 'object' &&
+			(
+				handler = descriptor.handler,
+				scope = 'scope' in descriptor ? descriptor.scope : this,
+				args = Array.isArray(descriptor.args) ? descriptor.args : 'args' in descriptor ? [ descriptor.args ] : []
+			);
+		
+		return handler && (args ? handler.bind(scope, ...args) : handler.bind(scope));
 		
 	}
 	
@@ -759,47 +804,6 @@ export class StringsBasement extends ParseHelper {
 	constructor() {
 		
 		super();
-		
-	}
-	
-	setGrammar(grammar, esc) {
-		
-		const l = (Array.isArray(grammar) ? grammar : [ grammar ]).length, map = this.map, terms = new Terms();
-		let i,ti, g, term, callback;
-		
-		i = ti = -1;
-		while (++i < l) {
-			
-			if (Array.isArray(g = grammar[i])) {
-				
-				terms[++ti] = [ ...this.setGrammar(g, esc) ];
-				
-			} else if (g && typeof g === 'object') {
-				
-				term = terms[++ti] = this[g.name] = new Term(g.term, g?.esc ?? esc),
-				(callback = this.getGrammarCallback(g.callback)) && map.set(term, callback);
-				
-			}
-			
-		}
-		
-		return terms;
-		
-	}
-	getGrammarCallback(descriptor) {
-		
-		let handler, scope, args;
-		
-		typeof descriptor === 'function' ?
-			(handler = descriptor, scope = this) :
-		descriptor && typeof descriptor === 'object' &&
-			(
-				handler = descriptor.handler,
-				scope = 'scope' in descriptor ? descriptor.scope : this,
-				args = Array.isArray(descriptor.args) ? descriptor.args : 'args' in descriptor ? [ descriptor.args ] : []
-			);
-		
-		return handler && (args ? handler.bind(scope, ...args) : handler.bind(scope));
 		
 	}
 	
@@ -905,7 +909,7 @@ export class StringsBasement extends ParseHelper {
 // エスケープも含め、上記の構文文字は任意の文字に変更しようと思えばできなくはないが、一切動作検証していないので強く推奨しない。
 
 // 使用例:
-// 	Strings.get("a`return '0'+1;`[label:0,5,1,5,'_',2,'_']<'#id[id=\"sample\"]', 'textContent'>(a|b)*label*");S
+// 	Strings.get("a`return '0'+1;`[label:0,5,1,5,'_',2,'_']<'#id[id=\"sample\"]', 'textContent'>(a|b)*label*");
 export class Strings extends StringsBasement {
 	
 	static descriptor = {
@@ -947,14 +951,17 @@ export class Strings extends StringsBasement {
 			
 			const	args = this.or.split(inner, ...this.frkArgHierarchy.getMasks(inner).masks),
 					l = args.length,
-					v = [];
+					v = [],
+					addr = detail.addr;
 			let i,vi, i0,l0, arg;
 			
 			i = vi = -1;
 			while (++i < l) {
-				i0 = -1, l0 = (arg = this.get(args[i], detail))?.length ?? 0;
+				i0 = -1, delete detail.addr, l0 = (arg = this.get(args[i], detail))?.length ?? 0;
 				while (++i0 < l0) v[++vi] = arg[i0];
 			}
+			
+			detail.addr = addr;
 			
 			return v;
 			
@@ -1012,8 +1019,6 @@ export class Strings extends StringsBasement {
 		this.hierarchy = this.setGrammar(Strings.hierarchy, esc),
 		this.argHierarchy = new Terms(this.str, this.re, this.evl),
 		this.frkArgHierarchy = new Terms(...this.argHierarchy, this.frk),
-		
-		this.super = [ this.str ],
 		
 		this.lbl = new Chr(/^(.*?)(;|:)/g, undefined, esc),
 		this.reFlag = '/',
@@ -1406,369 +1411,6 @@ export class Composer {
 		
 		
 		return container;
-		
-	}
-	
-}
-
-// 以下バックアップ。
-
-export class Brackets {
-	
-	static chr = '"';
-	static copyChr(a, esc) {
-		
-		return a instanceof Chr ? a.duplicate() : new Chr(a, undefined, esc);
-		
-	}
-	static sortLocales(a, b) {
-		return a.lo - b.lo;
-	}
-	static plot(str, ...data) {
-		
-		if (!(str += '')) return [ '' ];
-		
-		const dl = data.length;
-		
-		if (!dl) return [ str ];
-		
-		const locs = [];
-		let i,i0,l0,li, datum;
-		
-		i = li = -1;
-		while (++i < dl) {
-			i0 = -1, l0 = (datum = data[i]).length;
-			while (++i0 < l0) locs[++li] = datum[i0];
-		}
-		
-		if (li === -1) return [ str ];
-		
-		const sl = str.length - 1, result = [], max = Math.max, min = Math.min;
-		let loc,sub,cursor;
-		
-		i = i0 = -1, cursor = 0, ++li, locs.sort(Brackets.sortLocales);
-		while (++i < li) {
-			(sub = str.substring(cursor, max((loc = locs[i]).lo, 0))) && (result[++i0] = sub);
-			if (min(cursor = (result[++i0] = loc).ro, sl) === sl) break;;
-		}
-		cursor <= sl && (result[++i0] = str.substring(cursor));
-		
-		return result;
-		
-	}
-	
-	constructor(l, r, esc) {
-		
-		this.setLR(l, r, esc);
-		
-	}
-	
-	setLR(l,r, esc) {
-		
-		this.setL(l, esc), this.setR(r, esc);
-		
-		return this;
-		
-	}
-	setL(l, esc) {
-		
-		return this.setChr('l', 'r', l, esc);
-		
-	}
-	setR(r, esc) {
-		
-		return this.setChr('r', 'l', r, esc);
-		
-	}
-	setChr(k, dk, chr = Brackets.chr, esc) {
-		
-		//return this[k] = chr instanceof Chr ? chr : Brackets.copyChr(chr || this[dk], esc);
-		return this[k] =	chr instanceof Chr ? chr :
-									chr ? new Chr(chr, undefined, esc) :
-										this[dk] instanceof Chr ? this[dk] : new Chr(this[dk] || Brackets.chr, undefined, esc);
-		
-	}
-	
-	mask(str, ...masks) {
-		
-		return { l: this.l.mask(str, ...masks), r: this.r.mask(str, ...masks) };
-		
-	}
-	locate(str, ...masks) {
-		
-		const lI = this.l.mask(str, ...masks).unmasked, lL = lI.length, locales = [];
-		
-		if (!lL) return locales;
-		
-		const	isSame = this.l.isSame(this.r), rI = isSame ? lI : this.r.mask(str, ...masks).unmasked, rL = rI.length;
-		
-		if (!rL) return locales;
-		
-		const rShift = isSame ? 2 : 1, localedL = [];
-		let i,i0,mi, L,LI, R,RI, locale;
-		
-		i = -1, mi = -1;
-		while ((i += rShift) < rL) {
-			i0 = lL, RI = (R = rI[i]).index;
-			while (--i0 > -1 && ((L = lI[i0]).index + L[0].length > RI || localedL.indexOf(i0) !== -1));
-			if (i0 > -1) {
-				localedL[++mi] = i0,
-				locale = locales[mi] = { l: L, lo: L.index, li: L.index + L[0].length, r: R, ri: RI, ro: RI + R[0].length },
-				locale.inner = str.substring(locale.li, locale.ri),
-				locale.outer = str.substring(locale.lo, locale.ro),
-				locale.captor = this;
-			}
-		}
-		
-		return locales;
-		
-	}
-	
-	// this.locale で得た情報を、その位置情報に基づいて階層化させる。
-	// 各要素には内包する要素を列挙した配列を示すプロパティ nested が設定される。
-	// 情報は not in place で階層化される（つまり引数に与えた値は変化しない）が、要素内のプロパティの作成はシャローコピーで行なわれる。
-	// 第二引数 callback に関数を与えると、階層化する前の要素を引数に与えて階層化順にその関数を実行する。
-	// 階層化は左方上位から下位に向けて行なわれ、最下位まで到達すると右方へ移行する。
-	// 関数の戻り値が真を示すと、その要素は、その子要素を含め階層に含まれない。（その子要素へのコールバック関数の実行も行なわれない）
-	// 関数には要素、要素の位置、階層化前の情報の要素長、階層化前の情報を列挙した配列、このインスタンスの参照が順に引数として与えられる。
-	nest(locales, callback) {
-		
-		const	locs = [ ...locales ], l = locs.length, data = [], nested = [],
-				hasCallback = typeof callback === 'function';
-		let i,i0,di,ni, loc, datum, cancels;
-		
-		locs.sort(Brackets.sortLocales),
-		
-		i = di = -1;
-		while (++i < l) {
-			
-			i0 = i, ni = -1, datum = { ...(loc = locs[i]) },
-			cancels = hasCallback && callback(loc, i,l, locs, this);
-			while (++i0 < l && locs[i0].ri < loc.ri) nested[++ni] = locs[i0];
-			
-			cancels || (data[++di] = datum, ni === -1 || (datum.nested = this.nest(nested))),
-			ni === -1 || (nested.length = 0), i = i0 - 1;
-			
-		}
-		
-		return data;
-		
-	}
-	
-}
-
-export class __Strings {
-	
-	static {
-		
-		// esc = escape, str = string
-		const	esc = this.esc = new Sequence('\\'),
-				str = this.str = new Term([ "'", "'" ], esc),
-				evl = this.evl = new Term([ '`', '`' ], esc);
-		
-		// fnc = function, dom = document object model, amp = amplifier, frk = fork, lbl = label, re = recycle, dup = duplicate
-		this.fnc = new Term([ '{', '}' ], esc),
-		this.dom = new Term([ '<', '>' ], esc),
-		this.amp = new Term([ '[', ']' ], esc),
-		this.frk = new Term([ '(', ')' ], esc),
-		this.dup = new Term([ '^', '^' ], esc),
-		this.lbl = new Chr(/^(.*?)(;|:)/g, undefined, esc),
-		this.re = new Term([ '*', '*' ], esc),
-		this.reFlag = '/',
-		
-		// dot, cmm = comma, or, num = number, stx = regeXp for STring, evx = regexp for eval,
-		// idt = identify for labeled value
-		this.dot = new Chr('.', undefined, esc),
-		this.cmm = new Chr(',', undefined, esc),
-		this.or = new Chr('|', undefined, esc),
-		this.num = /^\s*(-?\d+(?:\.\d+)?)\s*$/,
-		this.stx = new RegExp(`^\\s*${str.chr(0).unit.source}(.*)${str.chr(1).unit.source}\\s*$`),
-		this.evx = new RegExp(`^\\s*${evl.chr(0).unit.source}(.*)${evl.chr(1).unit.source}\\s*$`),
-		this.idt = /^\s*([$A-Za-z_\u0080-\uFFFF][$\w\u0080-\uFFFF]*)\s*$/g,
-		
-		// operator scape 仕様上設定しているが、このエスケープはいかなる文字にもマッチしない=エスケープしない
-		this.oesc = new Sequence(/(?!)/g),
-		this.ops = new Chr(/[+\-*/]/g, undefined, this.oesc),
-		this.add = new Chr('+', undefined, this.oesc),
-		this.sub = new Chr('-', undefined, this.oesc),
-		this.div = new Chr('/', undefined, this.oesc),
-		this.mul = new Chr('*', undefined, this.oesc),
-		
-		// 実際に使用される主な構文を優先順で列挙したリスト。
-		// 一切検証していないが、使用する構文の可否をこの値の変更だけで任意に行なえるかもしれない。
-		// 例えばセキュアであることが求められる場合、以下の this.evl を消すことで簡易に対応できる。
-		this.hierarchy = new Terms(
-			str,
-			this.re,
-			evl,
-			[ this.dom, this.amp, this.frk, this.dup ]
-		),
-		this.argHierarchy = new Terms(str, this.re, evl),
-		this.frkArgHierarchy = new Terms(...this.argHierarchy, this.frk),
-		
-		this.cache = {};
-		
-	}
-	
-	static get(v, labeled = {}) {
-		
-		if (v in Strings.cache) return [ ...Strings.cache[v] ];
-		
-		const masks = Strings.hierarchy.getMasks(v).masks,
-				plot = Term.plot(v, ...(masks.splice(Strings.hierarchy.indexOf(Strings.str), 1), masks)),
-				l = plot.length, values = [];
-		let i,i0,l0, v0, p,p0,args;
-		
-		//hi(plot);
-		
-		i = -1, v0 = '';
-		while (++i < l) {
-			
-			(i0 = typeof (p = plot[i]) === 'string') ? (v0 += p) :
-				(i0 = p.captor !== Strings.dup) ? (v0 += v.substring(p.lo, p.ro)) : (i0 = !(p0 = plot[i + 1]));
-			
-			if (i0) continue;
-			
-			i0 = -1, l0 = (args = Strings.getArgs(p.inners[0], labeled, Strings.argHierarchy))[0],
-			typeof p0 === 'string' || (p0 = p0.outers);
-			while (++i0 < l0) values[i0] = p0;
-			v0 += values.join(args?.[1] ?? ''), values.length = 0, ++i;
-			
-		};
-		
-		if (v !== v0) return Strings.get(v0, labeled);
-		
-		i = -1;
-		while (++i < l) values[i] = Strings.parseBlock(plot[i], labeled);
-		
-		//hi(...values, labeled);
-		
-		const composed = Composer.compose(values), cl = composed.length;
-		
-		i = -1;
-		while (++i < cl) composed[i] = Strings.esc.replace(composed[i]);
-		
-		return [ ...(Strings.cache[v] = composed) ];
-		
-	}
-	static parseBlock(block, labeled = {}) {
-		
-		let l;
-		
-		labeled.v ||= {}, l = (labeled.addr ||= []).length;
-		
-		if (typeof block === 'string') {
-			labeled.addr[l] = ''+l;
-			return block;
-		}
-		
-		const { label, registers, inner } = Strings.parseInner(block.inners[0], block.captor === Strings.evl);
-		let i,i0,l0, args, v,vi, arg;
-		
-		labeled.addr[l] = label || ''+l;
-		
-		switch (block.captor) {
-			
-			case Strings.evl:
-			v = (new Function('labeled', inner))(labeled.v);
-			break;
-			
-			case Strings.fnc:
-			
-			args = Strings.getArgs(inner, labeled, Strings.argHierarchy),
-			
-			v = {
-				methods: [
-					{ value: args[0], name: args[1], args: args.slice(2) }
-				]
-			};
-			
-			break;
-			
-			case Strings.amp:
-			
-			args = Strings.getArgs(inner, labeled, Strings.argHierarchy),
-			
-			v = { from: args[0], to: args[1], value: args[2] },
-			args.length > 3 && (
-				v.methods = [
-					{
-						name: (args[3] = args?.[3] ?? 0) > 0 ? 'padStart' : 'padEnd',
-						args: [ Math.abs(args[3]), args?.[4] ?? undefined ]
-					}
-				]
-			);
-			
-			break;
-			
-			case Strings.frk:
-			i = vi = -1, v = [],
-			l = (args = Strings.or.split(inner, ...Strings.frkArgHierarchy.getMasks(inner).masks)).length;
-			while (++i < l) {
-				i0 = -1, l0 = (arg = Strings.get(args[i], labeled))?.length ?? 0;
-				while (++i0 < l0) v[++vi] = arg[i0];
-			}
-			break;
-			
-			case Strings.re:
-			v = (v = labeled.addr.indexOf(inner)) === -1 ? '' : inner[0] === Strings.reFlag ? -v|0 : v;
-			break;
-			
-			case Strings.dom:
-			args = Strings.getArgs(inner, labeled, Strings.argHierarchy),
-			v = {
-				selector: args?.[0],
-				propertyName: (arg = args?.[1]?.split('.') ?? [ '', 'textContent' ])[0] ? arg[0] : (arg.shift(), arg)
-			};
-			break;
-			
-			default:
-			v = inner;
-			
-		}
-		
-		label && (labeled.v[label] = v);
-		
-		return registers ? { neglect: v } : v;
-		
-	}
-	static parseInner(inner, unlabels) {
-		
-		const	{ str, evl } = Strings,
-				sLocs = str.locate(inner).completed,
-				eLocs = evl.locate(inner).completed,
-				label = unlabels || Strings.lbl.mask(inner, sLocs, eLocs).unmasked?.[0],
-				labeled = label && !unlabels;
-		
-		return {
-				label: label && label[1],
-				registers: label?.[2] === ';',
-				strLocs: labeled ? str.locate(inner = inner.substring(label.index + label[0].length)).completed : sLocs,
-				evlLocs: labeled ? evl.locate(inner).completed : eLocs,
-				inner
-			};
-		
-	}
-	static getArgs(str, labeled, hierarchy) {
-		
-		const args = Strings.cmm.split(str, ...hierarchy.getMasks(str).masks), l = args.length;
-		let i;
-		
-		i = -1;
-		while (++i < l) args[i] = Strings.settle(args[i], labeled);
-		
-		return args;
-		
-	}
-	static settle(str, labeled) {
-		
-		let matched;
-		
-		return	(matched = str.match(Strings.num)) ? +matched[1] :
-						(matched = str.match(Strings.stx)) ? matched[1] :
-							(matched = str.match(Strings.evx)) ? (new Function('labeled', matched[1]))(labeled) :
-								(labeled && typeof labeled === 'object' && (matched = str.match(Strings.idt))) ?
-									labeled?.[matched[1]] ?? undefined : undefined;
 		
 	}
 	
