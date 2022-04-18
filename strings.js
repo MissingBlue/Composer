@@ -293,6 +293,17 @@ export class Chr extends Unit {
 		return splitted;
 		
 	}
+	replace(str, replacer, ...masks) {
+		
+		const splitted = this.split(str, ...masks), l = splitted.length, l0 = l - 1, replaced = [];
+		let i, ri;
+		
+		i = ri = -1;
+		while (++i < l) replaced[++ri] = splitted[i], i === l0 || (replaced[++ri] = replacer);
+		
+		return replaced.join('');
+		
+	}
 	
 	duplicate() {
 		
@@ -381,15 +392,29 @@ export class Term extends Array {
 		
 		if (!++li) return [ str ];
 		
-		const sl = str.length - 1, result = [], max = Math.max, min = Math.min;
+		const sl = str.length - 1, result = [], { max, min } = Math;
 		let loc,sub,cursor;
 		
 		i = i0 = -1, cursor = 0, locs.sort(Term.sortLoc);
+		
+		//while (++i < li) {
+		//	cursor < (loc = locs[i]).lo &&
+		//		(sub = str.substring(cursor, max((loc = locs[i]).lo, 0))) && (result[++i0] = sub);
+		//	if (min(cursor = (result[++i0] = loc).ro, sl) === sl) break;
+		//}
+		//cursor <= sl && (result[++i0] = str.substring(cursor));
+		
+		// 何か問題が起きた時はここが原因の可能性が高いが、処理内容がややこしく解読には困難を伴う。
+		// 現状の処理は上記のコメント内の処理を適切な出力が行なえるように修正したものだが、
+		// 対処療法的で理解を伴っておらず、問題の再発および別の問題の発生の可能性は高い。
 		while (++i < li) {
-			cursor < (loc = locs[i]).lo &&
-				(sub = str.substring(cursor, max((loc = locs[i]).lo, 0))) && (result[++i0] = sub);
-			if (min(cursor = (result[++i0] = loc).ro, sl) === sl) break;;
+			cursor <= (loc = locs[i]).lo && (
+				(sub = str.substring(cursor, max((loc = locs[i]).lo, 0))) && (result[++i0] = sub),
+				cursor = (result[++i0] = loc).ro
+			);
+			if (min(loc.ro, str.length) === str.length) break;
 		}
+		
 		cursor <= sl && (result[++i0] = str.substring(cursor));
 		
 		return result;
@@ -695,7 +720,40 @@ export class Terms extends Array {
 	
 }
 
-// このオブジェクトを継承する場合、以下を実装する必要がある。
+// このオブジェクトを継承する場合、メソッド ParseHelper.protoype.setGrammar を通じて設定を行うことを推奨する。
+// setGrammar は、構文記述子を優先順に列挙した配列を指定する。
+// 構文記述子には以下のプロパティを設定できる。
+// 	name
+// 		記述子によって作られた構文文字 Term を持つ自身のプロパティ名。プロパティは直接インスタンスに作成される。
+// 	term
+// 		任意の数の構文文字を列挙する配列で、Term の引数。
+// 	callback
+// 		構文文字に一致した際に呼びだされるコールバック関数。Function を指定すると、関数は this で束縛される。
+// 		Object を指定すると、以下のプロパティに基づいて束縛を任意に設定できる。
+// 		handler
+// 			コールバック関数本体。
+// 		scope
+// 			関数を束縛するオブジェクト。未指定だと既定値として this が使われる。
+// 		args
+// 			関数は Function.ptototype.bind によって束縛され、このプロパティはその第二引数に相当する。
+// 			このプロパティが存在しない場合、bind の第二引数は未指定で実行される。
+// 			値が配列であればそれをそのまま、それ以外の場合は配列に入れて指定される。
+// 			引数に配列を指定したい場合は配列の中にその配列を入れて指定する。
+// 	super
+// 		このプロパティが真を示す記述子は、それによって作られた Term が一致を示す文字列を構文ではなく値として使う。
+// 		これは通常、構文内で型の違う値を区別するために指定する。
+// 	esc
+// 		任意のエスケープ文字を指定する場合はこのプロパティに指定する。
+//
+// 記述子を列挙した配列はネストできるが、ネスト内の記述子の扱いは最上位とは少し異なる。
+// より厳密に言えば、扱いが異なるのは記述子が作る Term に対してで、
+// 最上位は常に先行する Term の一致結果を考慮するが、ネスト内は、先行する Term の存在を考慮しない。
+// この挙動については Terms.prototype.getMasks のコメントで説明しているか、説明する予定。
+//
+// 任意の構文体系を作る際に、共通化できる処理を提供するのがこのオブジェクトの意図で、
+// このオブジェクトを継承した先で構文のより具体的な仕様を実装することを想定している。
+//
+// 以下覚え書きバックアップ
 // プロパティ
 // 	hierarchy
 // 		Term(構文文字)を優先順で列挙した Terms。
@@ -710,19 +768,18 @@ export class Terms extends Array {
 // 	after
 export class ParseHelper {
 	
+	static deletes = Symbol();
+	static passthrough = Symbol();
+	
 	constructor() {
 		
-		this.cache = {},
-		
-		this.super = [],
-		
-		this.map = new Map();
+		this.super = [];
 		
 	}
 	
-	setGrammar(grammar, esc) {
+	setGrammar(grammar, esc, terms = [], map = new Map()) {
 		
-		const l = (Array.isArray(grammar) ? grammar : [ grammar ]).length, map = this.map, terms = new Terms();
+		const l = (Array.isArray(grammar) ? grammar : [ grammar ]).length;
 		let i,ti,si, g, term, callback;
 		
 		i = ti = si = -1;
@@ -730,11 +787,11 @@ export class ParseHelper {
 			
 			if (Array.isArray(g = grammar[i])) {
 				
-				terms[++ti] = [ ...this.setGrammar(g, esc) ];
+				this.setGrammar(g, esc, terms[++ti] = [], map);
 				
 			} else if (g && typeof g === 'object') {
 				
-				term = terms[++ti] = this[g.name] = new Term(g.term, g?.esc ?? esc),
+				term = terms[++ti] = this[g.name] = g.term instanceof Term ? g.term : new Term(g.term, g?.esc ?? esc),
 				(callback = this.getGrammarCallback(g.callback)) && map.set(term, callback),
 				g.super && (this.super[++si] = term);
 				
@@ -762,16 +819,14 @@ export class ParseHelper {
 		
 	}
 	
-	safeReturn(k, v) {
-		const c = (this.cache[k] = v)?.constructor;
+	safeReturn(v) {
+		const c = v?.constructor;
 		return c === Array ? [ ...v ] : c === Object ? { ...v } : v;
 	}
 	
-	get(v, detail = {}) {
+	_get(v, detail = {}) {
 		
-		if (v in this.cache) return [ ...this.cache[v] ];
-		
-		const	masks = this.hierarchy.getMasks(v).masks;
+		const	masks = this.hierarchy.getMasks(v).masks, passthrough = Symbol();
 		let i,l,i0, v0;
 		
 		if (Array.isArray(this.super)) {
@@ -783,50 +838,116 @@ export class ParseHelper {
 		
 		const plot = Term.plot(v, ...masks), parsed = [];
 		
-		if (typeof this.before === 'function' && (v0 = this.before(plot, ...arguments, this)) !== undefined)
-			return this.safeReturn(v, v0);
+		l = plot.length;
 		
-		i = -1, l = plot.length;
-		while (++i < l) parsed[i] = this.main(plot[i], parsed, plot, ...arguments, this);
+		if (
+			typeof this.before === 'function' &&
+			(v0 = this.before(plot, l, v, detail, passthrough, this), l = plot.length, v0) !== passthrough
+		) return this.safeReturn(v0);
+		
+		if (typeof this.main === 'function') {
+			
+			const deletes = Symbol(), splice = [];
+			let pi;
+			
+			i = pi = -1, l = plot.length;
+			while (++i < l) {
+				
+				v0 = this.main(plot[i], parsed, plot, l, v, detail, splice, deletes, this);
+				
+				if (splice.length) {
+					
+					pi = parsed.push(...splice) - 1,
+					splice.length = 0;
+					
+				} else if (v0 === deletes) {
+					
+					plot.splice(i--,1), --l;
+					
+				} else {
+					
+					parsed[++pi] = v0;
+					
+				}
+				
+			}
+			
+		} else parsed.push(...plot);
 		
 		return	this.safeReturn(
-						v,
-						typeof this.after === 'function' &&
-							(v0 = this.after(parsed, plot, ...arguments, this)) !== undefined ? v0 : parsed
+						typeof this.after === 'function' ?
+							this.after(parsed, parsed.length, plot, l, v, detail, this) : parsed
 					);
 		
 	}
-	
-}
-
-export class StringsBasement extends ParseHelper {
-	
-	constructor() {
+	get(str, detail = {}) {
 		
-		super();
+		let v;
+		
+		for (v of this.getParser(str, detail));
+		
+		return v;
 		
 	}
-	
-	main(block, parsed, plot, input, detail, self) {
+	*getParser(str, detail = {}) {
 		
-		let l;
+		const	masks = this.hierarchy.getMasks(str).masks, { deletes, passthrough } = ParseHelper;
+		let i,l,i0, v;
 		
-		detail.v ||= {}, l = (detail.addr ||= []).length;
-		
-		if (typeof block === 'string') {
-			detail.addr[l] = ''+l;
-			return block;
+		if (Array.isArray(this.super)) {
+			
+			i = -1, l = this.super.length;
+			while (++i < l) (i0 = this.hierarchy.indexOf(this.super[i])) === -1 || masks.splice(i0, 1);
+			
 		}
 		
-		const { label, registers, inner } = this.parse(block.inners[0], block.captor === this.evl);
-		let i,i0,l0, args, v,vi, arg;
+		const plot = Term.plot(str, ...masks), parsed = [];
 		
-		detail.addr[l] = label || ''+l;
+		l = plot.length;
 		
-		v = this.map.get(block.captor)?.(inner, ...arguments) ?? inner,
-		label && (detail.v[label] = v);
+		if (typeof this.before === 'function') {
+			
+			if ((v = this.safeReturn(this.before(plot, l, str, detail, passthrough, this), l = plot.length, v)) !== passthrough) return v;
+			
+			(v = yield v) && (plot = v);
+			
+		}
 		
-		return registers ? { neglect: v } : v;
+		if (typeof this.main === 'function') {
+			
+			const splice = [];
+			let pi;
+			
+			i = pi = -1, l = plot.length;
+			while (++i < l) {
+				
+				v = this.main(plot[i], parsed, plot, l, str, detail, splice, deletes, this);
+				
+				if (splice.length) {
+					
+					pi = parsed.push(...splice) - 1,
+					splice.length = 0;
+					
+				} else if (v === deletes) {
+					
+					plot.splice(i--,1), --l;
+					
+				} else {
+					
+					parsed[++pi] = v;
+					
+				}
+				
+			}
+			
+		} else parsed.push(...plot);
+		
+		(v = yield parsed) && (parsed = v);
+		
+		yield this.safeReturn(
+						typeof this.after === 'function' ?
+							this.after(parsed, parsed.length, plot, l, str, detail, this) : parsed
+					);
 		
 	}
 	
@@ -899,27 +1020,59 @@ export class StringsBasement extends ParseHelper {
 // 	ただし、この場合、指定するラベルは JavaScript の識別子と同じ命名規則に従っていなければならない。
 // 	https://developer.mozilla.org/ja/docs/Glossary/Identifier
 // ^...^
-// 	直後の構文ないし文字列を指定に従って繰り返す。
-// 	指定は 繰り返し回数、繰り返し文字列間の区切り文字 の順で , で区切って行なう。
-// 	この構文そのものは出力された文字列には一切反映されない。例えば文字列の末尾にこの構文が存在しても、この構文は文字列に何の影響も与えない。
-// 	Strings.get("^3^a") // aaa
-// 	この構文は他の構文と比べて若干特殊で、他のすべての構文に先行して、かつ独立して判定および処理が行なわれる。
-// 	また指定次第で容易に巨大な出力を生成する点に注意が必要。（そしてリソース不足エラーにより思ったより巨大なデータを得られない点にも気付くかもしれない）
+// 	直後の構文ないし文字列を指定に従って繰り返す。以下の引数を取る。
+// 	loopCount (optional)
+// 		任意の自然数で、| で区切られた右側の文字列を繰り返す回数を指定する。
+// 	separator (optional)
+// 		' で囲った任意の文字列で、| で区切られた右側の文字列を繰り返す時の区切り文字になる。
+// 	strings
+// 		繰り返す文字列を指定する。上記の引数とは | で区切る。指定された文字列は ParseHelper.prototype.get の第一引数として再帰して解析される。
+// 		重要な点として、この文字列は ' で囲う必要はない。' で囲うと構文を含んでいても単一の文字列として解釈される。
+// 		また、文字列に構文 (...) を使用する場合、同構文内の区切り文字 | は \ でエスケープしなければ認識されない。
+// 		文字列中にプレースホルダー $i $I $l が使える。$i は 0 から開始する現在のループ回数、$I は 1 から開始する同回数、$l は loopCount に置換される。
+// 		仮にこれらのプレースホルダーを文字列として使う場合は \\$i などとする。プレースホルダーは構文内外問わず任意に指定できる。
+// 	指定は "^2,','|a^" のように行なう。この出力は [ 'a,a' ] である。
+// 	指定次第で予期しない巨大な出力を生成する点に注意が必要。
+// 	（一方、リソース不足エラーにより思ったより巨大なデータを得られない点にも気付くかもしれない）
+// ~...~
+// 	この構文内の文字列を式として計算を行ないその結果を文字列にする。暫定的な実装で構文記号含め変更の必要が強い。
+// 	特に構文の優先順位の必然性など確認が不足している。対応しているのは四則演算のみ。
+// 	基本的には使う必要のない構文だが、^...^ でプレースホルダーを使って文字列を生成する時にやや有用。
 //
 // エスケープも含め、上記の構文文字は任意の文字に変更しようと思えばできなくはないが、一切動作検証していないので強く推奨しない。
 
 // 使用例:
 // 	Strings.get("a`return '0'+1;`[label:0,5,1,5,'_',2,'_']<'#id[id=\"sample\"]', 'textContent'>(a|b)*label*");
-export class Strings extends StringsBasement {
+export class Strings extends ParseHelper {
 	
 	static descriptor = {
 		
-		eval(inner, block, parsed, plot, input, detail, self) {
+		eval(inner, block, parsed, plot, plotLength, input, detail, splice, deletes, self) {
 			
 			return (new Function('detail', inner))(detail.v);
 			
 		},
-		reflection(inner, block, parsed, plot, input, detail, self) {
+		echo(inner, block, parsed, plot, plotLength, input, detail, splice, deletes, self) {
+			
+			const	args = this.or.split(inner, ...this.frkArgHierarchy.getMasks(inner).masks),
+					hasOpts = args.length > 1,
+					arg = hasOpts ? args[1] : args[0],
+					opts = hasOpts ? this.getArgs(args[0], detail, this.argHierarchy) : null,
+					l = opts?.[0] ?? 1,
+					separator = opts?.[1],
+					l0 = l - 1;
+			let i,ai, v, arg0, parser;
+			
+			i = ai = -1;
+			while (++i < l) {
+				arg0 = this.el.replace(this.eI.replace(this.ei.replace(arg, i), i + 1), l),
+				(v = (parser = this.getParser(arg0, detail)).next()).done ?
+					(splice[++ai] = v.value) : (ai = splice.push(...parser.next().value) - 1),
+				separator && i < l0 && (splice[++ai] = separator);
+			}
+			
+		},
+		reflection(inner, block, parsed, plot, plotLength, input, detail, splice, deletes, self) {
 			
 			const args = this.getArgs(inner, detail, this.argHierarchy);
 			
@@ -930,7 +1083,7 @@ export class Strings extends StringsBasement {
 			};
 			
 		},
-		consecutiveNumber(inner, block, parsed, plot, input, detail, self) {
+		consecutiveNumber(inner, block, parsed, plot, plotLength, input, detail, splice, deletes, self) {
 			
 			const	args = this.getArgs(inner, detail, this.argHierarchy),
 					v = { from: args[0], to: args[1], value: args[2] };
@@ -947,7 +1100,7 @@ export class Strings extends StringsBasement {
 			return v;
 			
 		},
-		fork(inner, block, parsed, plot, input, detail, self) {
+		fork(inner, block, parsed, plot, plotLength, input, detail, splice, deletes, self) {
 			
 			const	args = this.or.split(inner, ...this.frkArgHierarchy.getMasks(inner).masks),
 					l = args.length,
@@ -966,7 +1119,7 @@ export class Strings extends StringsBasement {
 			return v;
 			
 		},
-		recycle(inner, block, parsed, plot, input, detail, self) {
+		recycle(inner, block, parsed, plot, plotLength, input, detail, splice, deletes, self) {
 			
 			// inner[0] === this.reFlag で戻り値を分岐させているが、
 			// 仮に分岐する場合、detail.addr.indexOf(inner) が異なるキーで同じ結果を得ることになる。
@@ -979,7 +1132,7 @@ export class Strings extends StringsBasement {
 			return v = v === -1 ? '' : inner[0] === this.reFlag ? -v|0 : v;
 			
 		},
-		selector(inner, block, parsed, plot, input, detail, self) {
+		selector(inner, block, parsed, plot, plotLength, input, detail, splice, deletes, self) {
 			
 			const	args = this.getArgs(inner, detail, this.argHierarchy),
 					arg = args?.[1]?.split('.') ?? [ '', 'textContent' ];
@@ -989,13 +1142,19 @@ export class Strings extends StringsBasement {
 				propertyName: arg[0] ? arg[0] : (arg.shift(), arg)
 			};
 			
+		},
+		calc(inner, block, parsed, plot, plotLength, input, detail, splice, deletes, self) {
+			
+			return ''+this.getArgs(inner, detail, this.argHierarchy)[0];
+			
 		}
 	};
 	// 実際に使用される主な構文を優先順で列挙したリスト。
 	// 一切検証していないが、使用する構文の可否をこの値の変更だけで任意に行なえるかもしれない。
 	// 例えばセキュアであることが求められる場合、以下の this.evl を消すことで簡易に対応できる。
 	// str = string, re = recycle, evl = eval,
-	// fnc = function(reflection), dom = document object model, amp = amplifier, frk = fork, lbl = label, dup = duplicate
+	// fnc = function(reflection), dom = document object model, amp = amplifier, frk = fork, lbl = label,
+	// ech = echo = dup(old name) = duplicate
 	static hierarchy = [
 		{ name: 'str', term: [ "'", "'" ], super: true },
 		{ name: 're', term: [ '*', '*' ], callback: Strings.descriptor.recycle },
@@ -1005,7 +1164,9 @@ export class Strings extends StringsBasement {
 			{ name: 'dom', term: [ '<', '>' ], callback: Strings.descriptor.selector },
 			{ name: 'amp', term: [ '[', ']' ], callback: Strings.descriptor.consecutiveNumber },
 			{ name: 'frk', term: [ '(', ')' ], callback: Strings.descriptor.fork },
-			{ name: 'dup', term: [ '^', '^' ] }
+			{ name: 'ech', term: [ '^', '^' ], callback: Strings.descriptor.echo },
+			{ name: 'clc', term: [ '~', '~' ], callback: Strings.descriptor.calc },
+			//{ name: 'dup', term: [ '^', '^' ] }
 		]
 	];
 	
@@ -1014,9 +1175,9 @@ export class Strings extends StringsBasement {
 		super();
 		
 		// esc = escape
-		const map = this.map, esc = this.esc = new Sequence('\\');
+		const esc = this.esc = new Sequence('\\');
 		
-		this.hierarchy = this.setGrammar(Strings.hierarchy, esc),
+		this.setGrammar(Strings.hierarchy, esc, this.hierarchy = new Terms(), this.map = new Map()),
 		this.argHierarchy = new Terms(this.str, this.re, this.evl),
 		this.frkArgHierarchy = new Terms(...this.argHierarchy, this.frk),
 		
@@ -1028,10 +1189,16 @@ export class Strings extends StringsBasement {
 		this.dot = new Chr('.', undefined, esc),
 		this.cmm = new Chr(',', undefined, esc),
 		this.or = new Chr('|', undefined, esc),
-		this.num = /^\s*(-?\d+(?:\.\d+)?)\s*$/,
-		this.stx = new RegExp(`^\\s*${this.str.chr(0).unit.source}(.*)${this.str.chr(1).unit.source}\\s*$`),
-		this.evx = new RegExp(`^\\s*${this.evl.chr(0).unit.source}(.*)${this.evl.chr(1).unit.source}\\s*$`),
-		this.idt = /^\s*([$A-Za-z_\u0080-\uFFFF][$\w\u0080-\uFFFF]*)\s*$/g;
+		// echo increment, echo length
+		this.ei = new Chr(/\$i/g, undefined, esc),
+		this.eI = new Chr(/\$I/g, undefined, esc),
+		this.el = new Chr(/\$l/g, undefined, esc),
+		
+		this.expression = new Expression({ str: this.str, evl: this.evl }, esc);
+		//this.num = /^\s*(-?\d+(?:\.\d+)?)\s*$/,
+		//this.stx = new RegExp(`^\\s*${this.str.chr(0).unit.source}(.*)${this.str.chr(1).unit.source}\\s*$`),
+		//this.evx = new RegExp(`^\\s*${this.evl.chr(0).unit.source}(.*)${this.evl.chr(1).unit.source}\\s*$`),
+		//this.idt = /^\s*([$A-Za-z_\u0080-\uFFFF][$\w\u0080-\uFFFF]*)\s*$/g;
 		
 		// operator scape 仕様上設定しているが、このエスケープはいかなる文字にもマッチしない=エスケープしない
 		//this.oesc = new Sequence(/(?!)/g),
@@ -1043,32 +1210,57 @@ export class Strings extends StringsBasement {
 		
 	}
 	
-	before(plot, input, detail, self) {
+	before(plot, plotLength, input, detail, passthrough, self) {
 		
 		const values = [];
 		let i,l,i0,l0, v,p,p0, args;
 		
 		detail.v ||= {}, detail.addr ||= [];
 		
-		i = -1, l = plot.length, v = '';
-		while (++i < l) {
-			
-			(i0 = typeof (p = plot[i]) === 'string') ? (v += p) :
-				(i0 = p.captor !== this.dup) ? (v += input.substring(p.lo, p.ro)) : (i0 = !(p0 = plot[i + 1]));
-			
-			if (i0) continue;
-			
-			i0 = -1, l0 = (args = this.getArgs(p.inners[0], detail, this.argHierarchy))[0],
-			typeof p0 === 'string' || (p0 = p0.outers);
-			while (++i0 < l0) values[i0] = p0;
-			v += values.join(args?.[1] ?? ''), values.length = 0, ++i;
-			
-		};
+		//i = -1, l = plot.length, v = '';
+		//while (++i < l) {
+		//	
+		//	(i0 = typeof (p = plot[i]) === 'string') ? (v += p) :
+		//		(i0 = p.captor !== this.dup) ? (v += input.substring(p.lo, p.ro)) : (i0 = !(p0 = plot[i + 1]));
+		//	
+		//	if (i0) continue;
+		//	
+		//	i0 = -1, l0 = (args = this.getArgs(p.inners[0], detail, this.argHierarchy))[0],
+		//	typeof p0 === 'string' || (p0 = p0.outers);
+		//	while (++i0 < l0) values[i0] = p0;
+		//	v += values.join(args?.[1] ?? ''), values.length = 0, ++i;
+		//	
+		//};
+		//
+		//if (v !== input) return this.get(v, detail);
 		
-		if (v !== input) return this.get(v, detail);
+		return passthrough;
 		
 	}
-	after(parsed, plot, input, detail, self) {
+	
+	main(block, parsed, plot, plotLength, input, detail, splice, deletes, self) {
+		
+		let l;
+		
+		detail.v ||= {}, l = (detail.addr ||= []).length;
+		
+		if (typeof block === 'string') {
+			detail.addr[l] = ''+l;
+			return block;
+		}
+		
+		const { label, registers, inner } = this.parse(block.inners[0], block.captor === this.evl);
+		let i,i0,l0, args, v,vi, arg;
+		
+		detail.addr[l] = label || ''+l;
+		v = this.map.get(block.captor)?.(inner, ...arguments) ?? inner,
+		label && (detail.v[label] = v);
+		
+		return registers ? { neglect: v } : v;
+		
+	}
+	
+	after(parsed, parsedLength, plot, plotLength, input, detail, self) {
 		
 		const composed = Composer.compose(parsed), cl = composed.length;
 		let i;
@@ -1098,26 +1290,278 @@ export class Strings extends StringsBasement {
 		
 	}
 	
-	getArgs(str, labeled, hierarchy) {
+	getArgs(str, labeled, hierarchy, passthrough) {
 		
-		const args = this.cmm.split(str, ...hierarchy.getMasks(str).masks), l = args.length;
+		const	args = this.cmm.split(str, ...hierarchy.getMasks(str).masks), l = args.length,
+				pt = Array.isArray(passthrough) && passthrough.length;
 		let i;
 		
 		i = -1;
-		while (++i < l) args[i] = this.settle(args[i], labeled);
+		while (++i < l) args[i] = pt && passthrough.indexOf(i) !== -1 ? args[i] : this.expression.get(args[i], labeled);
 		
 		return args;
 		
 	}
-	settle(str, labeled) {
+	//settle(str, labeled) {
+	//	
+	//	let matched;
+	//	
+	//	return	(matched = str.match(this.num)) ? +matched[1] :
+	//					(matched = str.match(this.stx)) ? matched[1] :
+	//						(matched = str.match(this.evx)) ? (new Function('labeled', matched[1]))(labeled) :
+	//							(labeled && typeof labeled === 'object' && (matched = str.match(this.idt))) ?
+	//								labeled?.[matched[1]] ?? undefined : undefined;
+	//	
+	//}
+	
+}
+
+// 機能するが、既存の処理内では一行で済ませているのに比べるとあまりにも非効率。
+//export class ArgsSplitter extends ParseHelper {
+//	
+//	static hierarchy = [
+//		{ name: 'str', term: [ "'", "'" ], super: true },
+//		{ name: 're', term: [ '*', '*' ], super: true },
+//		{ name: 'evl', term: [ '`', '`' ], super: true },
+//		{ name: 'cmm', term: [ ',' ] },
+//	];
+//	
+//	constructor() {
+//		
+//		super();
+//		
+//		const esc = this.esc = new Sequence('\\');
+//		
+//		this.setGrammar(ArgsSplitter.hierarchy, esc, this.hierarchy = new Terms(), this.map = new Map());
+//		
+//	}
+//	before(plot, plotLength, input, detail, self) {
+//		
+//		let i;
+//		
+//		i = -1;
+//		while (++i < plotLength) typeof plot[i] === 'string' || (plot.splice(i--, 1), --plotLength);
+//		
+//	}
+//	main(block, parsed, plot, plotLength, input, detail, deletes, self) {
+//		
+//		return block;
+//		
+//	}
+//	
+//}
+
+export class Expression extends ParseHelper {
+	
+	static descriptor = {
 		
-		let matched;
+		call(inner, block, parsed, plot, plotLength, input, detail, splice, deletes, self) {
+			
+			// コメントの行は変更前の処理で、ネストする計算でエラーが起きていたが、
+			// ここに手を加えた覚えはないものの、戻り値の [0] を外すと動作するようになっている。またおかしくなった時はここを確認。
+			// 実際は手を加えた(恐らく Expression.prototype.after の戻り値)が、ここが変更箇所のいくつかの呼び出し元のひとつであるため、
+			// 変更時に影響の確認を怠っていたものと思われる。
+			//return this.get(inner, detail)[0];
+			return this.get(inner, detail);
+			
+		},
+		number(inner, block, parsed, plot, plotLength, input, detail, splice, deletes, self) {
+			return +block.$;
+		},
 		
-		return	(matched = str.match(this.num)) ? +matched[1] :
-						(matched = str.match(this.stx)) ? matched[1] :
-							(matched = str.match(this.evx)) ? (new Function('labeled', matched[1]))(labeled) :
-								(labeled && typeof labeled === 'object' && (matched = str.match(this.idt))) ?
-									labeled?.[matched[1]] ?? undefined : undefined;
+		string(inner, block, parsed, plot, plotLength, input, detail, splice, deletes, self) {
+			return inner;
+		},
+		
+		eval(inner, block, parsed, plot, plotLength, input, detail, splice, deletes, self) {
+			return (new Function('labeled', inner))(detail);
+		},
+		
+		identify(inner, block, parsed, plot, plotLength, input, detail, splice, deletes, self) {
+			return detail && typeof detail === 'object' ? detail?.[inner] ?? undefined : undefined;
+		},
+		
+		ops(inner, block, parsed, plot, plotLength, input, detail, splice, deletes, self) {
+			return this.opsSymbol[block.$];
+		}
+		
+	};
+	static setTermTo(hierarchyDescriptors, name, term) {
+		
+		const l = hierarchyDescriptors.length;
+		let i, hd;
+		
+		i = -1;
+		while (++i < l) {
+			
+			if ((hd = hierarchyDescriptors[i]).constructor === Array) {
+				
+				Expression.setTermTo(hd, name, term);
+				
+			} else if (hd && typeof hd === 'object' && hd.name === name) {
+				
+				hd.term = term;
+				return;
+				
+			}
+			
+		}
+		
+	}
+	static add(v, left, right, idx, ldx, rdx, parsed, parsedLength, plot, plotLength, input, detail, splice, self) {
+		
+		return [
+			idx - (idx - ldx),
+			(rdx ?? idx) - ldx + 1,
+			left === null ? right === null ? null : +right : right === null ? left : left + right
+		];
+		
+	}
+	static sub(v, left, right, idx, ldx, rdx, parsed, parsedLength, plot, plotLength, input, detail, splice, self) {
+		
+		return [
+			idx - (idx - ldx),
+			(rdx ?? idx) - ldx + 1,
+			left === null ? right === null ? null : -right : right === null ? left : left - right
+		];
+		
+	}
+	static div(v, left, right, idx, ldx, rdx, parsed, parsedLength, plot, plotLength, input, detail, splice, self) {
+		
+		return [
+			idx - (idx - ldx),
+			(rdx ?? idx) - ldx + 1,
+			left === null ? right === null ? null : right : right === null ? left : left / right
+		];
+		
+	}
+	static mul(v, left, right, idx, ldx, rdx, parsed, parsedLength, plot, plotLength, input, detail, splice, self) {
+		
+		return [
+			idx - (idx - ldx),
+			(rdx ?? idx) - ldx + 1,
+			left === null ? right === null ? null : right : right === null ? left : left * right
+		];
+		
+	}
+	
+	constructor(term, esc) {
+		
+		super(),
+		
+		this.opsSymbol = {
+			'+': Symbol(),
+			'-': Symbol(),
+			'/': Symbol(),
+			'*': Symbol()
+		},
+		this.opsIndex = {
+			[ this.opsSymbol['+'] ]: Expression.add,
+			[ this.opsSymbol['-'] ]: Expression.sub,
+			[ this.opsSymbol['/'] ]: Expression.div,
+			[ this.opsSymbol['*'] ]: Expression.mul
+		},
+		this.precedence = [
+			this.opsSymbol['/'],
+			this.opsSymbol['*'],
+			this.opsSymbol['-'],
+			this.opsSymbol['+']
+		],
+		
+		this.hierarchyDescriptors = [
+			{ name: 'str', term: [ "'", "'" ], callback: Expression.descriptor.string },
+			{ name: 'cll', term: [ '(', ')' ], callback: Expression.descriptor.call },
+			{ name: 'evl', term: [ '`', '`' ], callback: Expression.descriptor.eval },
+			{ name: 'num', term: [ /\d+(?:\.\d+)?/g ], callback: Expression.descriptor.number },
+			{ name: 'idt', term: [ /[$A-Za-z_\u0080-\uFFFF][$\w\u0080-\uFFFF]*/g ], callback: Expression.descriptor.identify },
+			{	name: 'ops',
+				term: [
+					new RegExp(`(?:${Object.keys(this.opsSymbol).map(v => Unit.escapeRegExpStr(v)).join('|')})`, 'g')
+				],
+				callback: Expression.descriptor.ops
+			}
+		],
+		
+		this.map = new Map(),
+		
+		this.setTerm(term, this.esc = esc instanceof Sequence ? esc : new Sequence('\\'));
+		
+	}
+	
+	setTerm(term, esc = this.esc) {
+		
+		const hd = this.hierarchyDescriptors, map = this.map, setTermTo = Expression.setTermTo;
+		let k, t,t0;
+		
+		for (k in term)	(t = term[k]) instanceof Term || (t = new Term(t, esc)),
+								(t0 = this[k]) && map.delete(t0),
+								setTermTo(hd, k, t);
+		
+		return this.setGrammar(hd, this.esc, this.hierarchy = new Terms(), map);
+		
+	}
+	main(block, parsed, plot, plotLength, input, detail, splice, deletes, self) {
+		
+		if (typeof block === 'string') return deletes;
+		
+		const inner = block.inners[0] || block.$;
+		
+		return this.map.get(block.captor)?.(inner, ...arguments) ?? deletes;
+		
+	}
+	
+	after(parsed, parsedLength, plot, plotLength, input, detail, self) {
+		
+		const prcdc = this.precedence, l = prcdc.length, splice = Array.prototype.splice;
+		let i,i0,li,ri, op,p,v, lp, spliceArgsLength;
+		
+		i = -1, lp = parsedLength - 1;
+		while (++i < l) {
+			
+			i0 = -1, op = prcdc[i];
+			while (++i0 < parsedLength) {
+				
+				(p = parsed[i0]) === op && (
+					
+					v = this.opsIndex[p]?.(
+							p,
+							(li = i0 > 0 ? i0 - 1 : null) === null ? li : parsed[li],
+							(ri = i0 === lp ? null : i0 + 1) === null? ri : parsed[ri],
+							i0, li, ri,
+							...arguments
+						),
+					Array.isArray(v) && (
+							splice.call(parsed, ...v),
+							i0 = (v[0] + (spliceArgsLength = v.slice(2).length)) - 1,
+							lp = (parsedLength -= v[1] - spliceArgsLength) - 1
+						)
+				)
+				
+			}
+			
+		}
+		
+		return parsed[0];
+		
+		//i = -1, lp = parsedLength - 1;
+		//while (++i < parsedLength) {
+		//	typeof (p = parsed[i]) === 'symbol' && (
+		//			v = this.opsIndex[p]?.(
+		//					p,
+		//					(li = i > 0 ? i - 1 : null) === null ? li : parsed[li],
+		//					(ri = i === lp ? null : i + 1) === null? ri : parsed[ri],
+		//					i, li, ri,
+		//					...arguments
+		//				),
+		//			Array.isArray(v) && (
+		//					Array.prototype.splice.call(parsed, ...v),
+		//					i = (v[0] + v?.[2]?.length) - 1,
+		//					lp = (parsedLength -= (v[1] - v[2].length)) - 1
+		//				)
+		//		)
+		//}
+		//
+		//return parsed.length === 1 ? parsed[0] : parsed.join('');
 		
 	}
 	
