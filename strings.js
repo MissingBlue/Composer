@@ -295,13 +295,7 @@ export class Chr extends Unit {
 	}
 	replace(str, replacer, ...masks) {
 		
-		const splitted = this.split(str, ...masks), l = splitted.length, l0 = l - 1, replaced = [];
-		let i, ri;
-		
-		i = ri = -1;
-		while (++i < l) replaced[++ri] = splitted[i], i === l0 || (replaced[++ri] = replacer);
-		
-		return replaced.join('');
+		return this.split(str, ...masks).join(replacer);
 		
 	}
 	
@@ -322,9 +316,7 @@ export class Chr extends Unit {
 	
 }
 
-// Brackets の置き換えを意図したオブジェクト。
 // Array を継承し、自身の要素として設定された任意の数の Chr を通じて、文字列の位置の特定に関する処理を行なうメソッドを提供する。
-// 仕様の大部分は Brackets の流用。
 export class Term extends Array {
 	
 	static escSeq = '\\';
@@ -824,62 +816,6 @@ export class ParseHelper {
 		return c === Array ? [ ...v ] : c === Object ? { ...v } : v;
 	}
 	
-	_get(v, detail = {}) {
-		
-		const	masks = this.hierarchy.getMasks(v).masks, passthrough = Symbol();
-		let i,l,i0, v0;
-		
-		if (Array.isArray(this.super)) {
-			
-			i = -1, l = this.super.length;
-			while (++i < l) (i0 = this.hierarchy.indexOf(this.super[i])) === -1 || masks.splice(i0, 1);
-			
-		}
-		
-		const plot = Term.plot(v, ...masks), parsed = [];
-		
-		l = plot.length;
-		
-		if (
-			typeof this.before === 'function' &&
-			(v0 = this.before(plot, l, v, detail, passthrough, this), l = plot.length, v0) !== passthrough
-		) return this.safeReturn(v0);
-		
-		if (typeof this.main === 'function') {
-			
-			const deletes = Symbol(), splice = [];
-			let pi;
-			
-			i = pi = -1, l = plot.length;
-			while (++i < l) {
-				
-				v0 = this.main(plot[i], parsed, plot, l, v, detail, splice, deletes, this);
-				
-				if (splice.length) {
-					
-					pi = parsed.push(...splice) - 1,
-					splice.length = 0;
-					
-				} else if (v0 === deletes) {
-					
-					plot.splice(i--,1), --l;
-					
-				} else {
-					
-					parsed[++pi] = v0;
-					
-				}
-				
-			}
-			
-		} else parsed.push(...plot);
-		
-		return	this.safeReturn(
-						typeof this.after === 'function' ?
-							this.after(parsed, parsed.length, plot, l, v, detail, this) : parsed
-					);
-		
-	}
 	get(str, detail = {}) {
 		
 		let v;
@@ -1184,8 +1120,7 @@ export class Strings extends ParseHelper {
 		this.lbl = new Chr(/^(.*?)(;|:)/g, undefined, esc),
 		this.reFlag = '/',
 		
-		// dot, cmm = comma, or, num = number, stx = regeXp for STring, evx = regexp for eval,
-		// idt = identify for labeled value
+		// dot, cmm = comma, or, idt = identify for labeled value
 		this.dot = new Chr('.', undefined, esc),
 		this.cmm = new Chr(',', undefined, esc),
 		this.or = new Chr('|', undefined, esc),
@@ -1195,44 +1130,12 @@ export class Strings extends ParseHelper {
 		this.el = new Chr(/\$l/g, undefined, esc),
 		
 		this.expression = new Expression({ str: this.str, evl: this.evl }, esc);
-		//this.num = /^\s*(-?\d+(?:\.\d+)?)\s*$/,
-		//this.stx = new RegExp(`^\\s*${this.str.chr(0).unit.source}(.*)${this.str.chr(1).unit.source}\\s*$`),
-		//this.evx = new RegExp(`^\\s*${this.evl.chr(0).unit.source}(.*)${this.evl.chr(1).unit.source}\\s*$`),
-		//this.idt = /^\s*([$A-Za-z_\u0080-\uFFFF][$\w\u0080-\uFFFF]*)\s*$/g;
-		
-		// operator scape 仕様上設定しているが、このエスケープはいかなる文字にもマッチしない=エスケープしない
-		//this.oesc = new Sequence(/(?!)/g),
-		//this.ops = new Chr(/[+\-*/]/g, undefined, this.oesc),
-		//this.add = new Chr('+', undefined, this.oesc),
-		//this.sub = new Chr('-', undefined, this.oesc),
-		//this.div = new Chr('/', undefined, this.oesc),
-		//this.mul = new Chr('*', undefined, this.oesc),
 		
 	}
 	
 	before(plot, plotLength, input, detail, passthrough, self) {
 		
-		const values = [];
-		let i,l,i0,l0, v,p,p0, args;
-		
 		detail.v ||= {}, detail.addr ||= [];
-		
-		//i = -1, l = plot.length, v = '';
-		//while (++i < l) {
-		//	
-		//	(i0 = typeof (p = plot[i]) === 'string') ? (v += p) :
-		//		(i0 = p.captor !== this.dup) ? (v += input.substring(p.lo, p.ro)) : (i0 = !(p0 = plot[i + 1]));
-		//	
-		//	if (i0) continue;
-		//	
-		//	i0 = -1, l0 = (args = this.getArgs(p.inners[0], detail, this.argHierarchy))[0],
-		//	typeof p0 === 'string' || (p0 = p0.outers);
-		//	while (++i0 < l0) values[i0] = p0;
-		//	v += values.join(args?.[1] ?? ''), values.length = 0, ++i;
-		//	
-		//};
-		//
-		//if (v !== input) return this.get(v, detail);
 		
 		return passthrough;
 		
@@ -1302,54 +1205,8 @@ export class Strings extends ParseHelper {
 		return args;
 		
 	}
-	//settle(str, labeled) {
-	//	
-	//	let matched;
-	//	
-	//	return	(matched = str.match(this.num)) ? +matched[1] :
-	//					(matched = str.match(this.stx)) ? matched[1] :
-	//						(matched = str.match(this.evx)) ? (new Function('labeled', matched[1]))(labeled) :
-	//							(labeled && typeof labeled === 'object' && (matched = str.match(this.idt))) ?
-	//								labeled?.[matched[1]] ?? undefined : undefined;
-	//	
-	//}
 	
 }
-
-// 機能するが、既存の処理内では一行で済ませているのに比べるとあまりにも非効率。
-//export class ArgsSplitter extends ParseHelper {
-//	
-//	static hierarchy = [
-//		{ name: 'str', term: [ "'", "'" ], super: true },
-//		{ name: 're', term: [ '*', '*' ], super: true },
-//		{ name: 'evl', term: [ '`', '`' ], super: true },
-//		{ name: 'cmm', term: [ ',' ] },
-//	];
-//	
-//	constructor() {
-//		
-//		super();
-//		
-//		const esc = this.esc = new Sequence('\\');
-//		
-//		this.setGrammar(ArgsSplitter.hierarchy, esc, this.hierarchy = new Terms(), this.map = new Map());
-//		
-//	}
-//	before(plot, plotLength, input, detail, self) {
-//		
-//		let i;
-//		
-//		i = -1;
-//		while (++i < plotLength) typeof plot[i] === 'string' || (plot.splice(i--, 1), --plotLength);
-//		
-//	}
-//	main(block, parsed, plot, plotLength, input, detail, deletes, self) {
-//		
-//		return block;
-//		
-//	}
-//	
-//}
 
 export class Expression extends ParseHelper {
 	
@@ -1543,26 +1400,6 @@ export class Expression extends ParseHelper {
 		
 		return parsed[0];
 		
-		//i = -1, lp = parsedLength - 1;
-		//while (++i < parsedLength) {
-		//	typeof (p = parsed[i]) === 'symbol' && (
-		//			v = this.opsIndex[p]?.(
-		//					p,
-		//					(li = i > 0 ? i - 1 : null) === null ? li : parsed[li],
-		//					(ri = i === lp ? null : i + 1) === null? ri : parsed[ri],
-		//					i, li, ri,
-		//					...arguments
-		//				),
-		//			Array.isArray(v) && (
-		//					Array.prototype.splice.call(parsed, ...v),
-		//					i = (v[0] + v?.[2]?.length) - 1,
-		//					lp = (parsedLength -= (v[1] - v[2].length)) - 1
-		//				)
-		//		)
-		//}
-		//
-		//return parsed.length === 1 ? parsed[0] : parsed.join('');
-		
 	}
 	
 }
@@ -1730,6 +1567,17 @@ export class Composer {
 		
 	}
 	
+	// parts の中に Promise が含まれる場合、この関数は、合成された文字列を列挙する配列で解決される Promise を返す。
+	// そうでない場合は合成された文字列を列挙する配列を返す。
+	// この関数はそのどちらが返るかを戻り値以外から知らせることはないが、
+	// 使用者は引数に与えた値からそのどちらが返るかを事前に知ることが可能である。（あるいは可能であるべきである）
+	static compose(parts) {
+		
+		const composer = Composer.getComposer(parts), { done, value } = composer.next();
+		
+		return done ? value : value instanceof Promise ? value.then(() => composer.next().value) : composer.next().value;
+		
+	}
 	// 第一引数 parts に指定された配列に列挙した記述子に基づいて任意の文字列を任意の数生成し、
 	// それを配列に列挙して戻り値にする。
 	// 各記述子の詳細については、対応するメソッドの説明を参照。
@@ -1756,12 +1604,19 @@ export class Composer {
 	// 数が満たない場合は生成順を 0 に巻き戻して結合を繰り返し、生成文字列がそれまでの文字列の数を超過する場合はそこで結合を終了する。
 	// 例えばそれまでに生成した文字列が 0,1,2 で、every を持つ記述子が 0,1 だった場合、合成された文字列は 00,11,20 になる。
 	// 同じように、every を持つ記述子が 0,1,2,3 を生成する場合、合成される文字列は 00,11,22 になる。
-	static compose(parts) {
+	static *getComposer(parts) {
 		
-		const	l = (Array.isArray(parts) ? parts : (parts = [ parts ])).length, URLs = [], values = [], snapshots = [];
-		let i,i0,l0, p, nodes,propertyName, composed = [], neglects;
+		let resolver;
+		const	l = (Array.isArray(parts) ? parts : (parts = [ parts ])).length, URLs = [],
+				values = [], snapshots = [], sources = [],
+				errored = Symbol(),
+				promise = new Promise(rs => resolver = rs),
+				// promise が拒否された時、現状はその値を空の文字列にしているが、これは恐らく予期しない出力を生成するため、拒否された Promise は詰めるべき。
+				promised = (v, idx, snapshot, source) =>
+					(v === errored && (v = ''), snapshot && (snapshot[idx] = v), source && (source[idx] = v), ++pi === pl && resolver());
+		let i,i0,l0,pi,pl, p, nodes,propertyName, composed = [], neglects, source;
 		
-		i = -1;
+		i = -1, pi = pl = 0;
 		while (++i < l) {
 			
 			switch (typeof (p = parts[i])) {
@@ -1800,26 +1655,49 @@ export class Composer {
 				
 				case 'number':
 				
-				if (!Array.isArray(p = snapshots[(i0 = (p = p|0) < 0) ? p * -1 : p])) continue;
+				snapshots[i] = sources[i] = p;
 				
-				if (i0) {
-					
-					Composer.every(composed, p);
-					continue;
-					
-				}
-				
-				values.push(...p);
-				
-				break;
+				continue;
 				
 				default: values[0] = p;
 				
 			}
 			
-			snapshots[i] = [ ...values ],
+			snapshots[i] = [ ...(neglects ? values : (sources[i] = [ ...values ])) ],
 			
-			neglects || (composed = Composer.mix(composed, values)), values.length = 0, neglects = null;
+			i0 = -1, l0 = values.length;
+			while (++i0 < l0) values[i0] instanceof Promise && (
+					++pl,
+					values[i0].then(v => v).catch(error => errored).finally(((idx, ss, src) => v => promised(v, idx, ss, src))(i, snapshots[i], sources[i]))
+				);
+			
+			values.length = 0, neglects = null;
+			
+		}
+		
+		pi && (yield promise),
+		
+		i = -1;
+		while (++i < l) {
+			
+			if (!(i in sources)) continue;
+			
+			if (typeof (source = sources[i]) === 'number') {
+				
+				if (!Array.isArray(source = snapshots[(i0 = (source = source|0) < 0) ? source * -1 : source])) continue;
+				
+				if (i0) {
+					
+					Composer.every(composed, source);
+					continue;
+					
+				}
+				
+				source = [ ...source ];
+				
+			}
+			
+			composed = Composer.mix(composed, source);
 			
 		}
 		
@@ -1855,6 +1733,37 @@ export class Composer {
 		
 		
 		return container;
+		
+	}
+	
+}
+class Agent {
+	
+	get(url, rx) {
+		
+		return new Promise((rs, rj) => {
+			
+			fetch('index.html').then(data=>data.text()).then(text => {
+					
+					const iframe = document.createElement('iframe'),
+							post = `<script>addEventListener('message', e=>{
+								const elements = document.querySelectorAll(e.data);
+							});</script>`;
+					
+					iframe.srcdoc = text + post;
+					iframe.addEventListener(
+						'load',
+						() => {
+							iframe.contentWindow.postMessage('hi', location.origin),
+							iframe.contentWindow.addEventListener('message', e => rs(e.data));
+						}
+					),
+					
+					document.body.appendChild(iframe);
+					
+				});
+			
+		});
 		
 	}
 	
