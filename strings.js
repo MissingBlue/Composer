@@ -1567,7 +1567,7 @@ export class Composer {
 		
 	}
 	
-	// parts の中に Promise が含まれる場合、この関数は、合成された文字列を列挙する配列で解決される Promise を返す。
+	// parts の中に Promise を生成する記述子が含まれる場合、この関数は、合成された文字列を列挙する配列で解決される Promise を返す。
 	// そうでない場合は合成された文字列を列挙する配列を返す。
 	// この関数はそのどちらが返るかを戻り値以外から知らせることはないが、
 	// 使用者は引数に与えた値からそのどちらが返るかを事前に知ることが可能である。（あるいは可能であるべきである）
@@ -1611,9 +1611,17 @@ export class Composer {
 				values = [], snapshots = [], sources = [],
 				errored = Symbol(),
 				promise = new Promise(rs => resolver = rs),
-				// promise が拒否された時、現状はその値を空の文字列にしているが、これは恐らく予期しない出力を生成するため、拒否された Promise は詰めるべき。
-				promised = (v, idx, snapshot, source) =>
-					(v === errored && (v = ''), snapshot && (snapshot[idx] = v), source && (source[idx] = v), ++pi === pl && resolver());
+				promised = (v, sym, snapshot, source) => {
+					
+					const i = snapshot.indexOf(sym);
+					
+					i === -1 || (
+						v === errored ?	(snapshot.splice(i, 1), source && source.splice(i, 1)) :
+												(snapshot[i] = v, source && (source[i] = v))
+					),
+					++pi === pl && resolver();
+					
+				};
 		let i,i0,l0,pi,pl, p, nodes,propertyName, composed = [], neglects, source;
 		
 		i = -1, pi = pl = 0;
@@ -1668,7 +1676,7 @@ export class Composer {
 			i0 = -1, l0 = values.length;
 			while (++i0 < l0) values[i0] instanceof Promise && (
 					++pl,
-					values[i0].then(v => v).catch(error => errored).finally(((idx, ss, src) => v => promised(v, idx, ss, src))(i, snapshots[i], sources[i]))
+					values[i0].then(v => v).catch(error => errored).finally(((sym, ss, src) => v => promised(idx, sym, ss, src))(snapshots[i][i0] = Symbol(), snapshots[i], sources[i]))
 				);
 			
 			values.length = 0, neglects = null;
