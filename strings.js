@@ -913,25 +913,46 @@ export class ParseHelper {
 // 	一方で、負の値を指定した場合、仮に出力の末尾が増加値を超えた場合、通常だとその値は出力に含まれないが、末尾を常に終了値で補完する。
 // 	この構文は Composer.increase の短絡表現のため、より詳細な説明が必要な場合は同メソッドのコメントを参照できる。
 // <...>
-// 	スクリプトの実行スコープが属するドキュメントから、セレクターに一致するすべての要素の、指定した属性ないしプロパティの値で文字列を生成する。
-// 	<'セレクター', '属性名'> で実行する。属性名を省略した場合、選択要素の textContent に置き換わる。
-// 	属性名の先頭に . を付けると、属性名ではなくプロパティ名として認識する。
-// 	ネストするプロパティを参照する時は '.dataset.dummy' のようにそれぞれの名前の前に . を置く。
+// 	第一引数の文字列をセレクターとして、指定されたドキュメント（既定ではスクリプトの実行元）内でそれに一致するすべての要素を選択し、
+// 	それらから第二引数に指定された属性名ないしプロパティ名の値で文字列を生成する。第二引数を省略した場合、選択要素の textContent に置き換わる。
+// 	第二引数に指定した文字列の先頭に . を付けると、属性名ではなくプロパティ名として認識し、
+// 	'.dataset.dummy' のように、以後 .プロパティ名 を連結してネストするプロパティにアクセスできる。
+// 	第三引数に正規表現を示す文字列を指定すると、その取得した値からその正規表現に一致する部分を抽出して文字列を生成する。
+// 	この正規表現は指定段階では文字列であるため、メタ文字に含まれる \ は \\ としなければならない。
+//
+// 	第一引数の前に | を置いて、その左側に URL に相当する文字列を指定すると、その URL が示す HTML 文書内から要素の値を取得する。
+// 	URL には絶対、相対パスを指定できるが、絶対パスを指定しても同一オリジンポリシーによりリソースが取得できることはないと思われる。
+// 	相対パスを指定した場合、このスクリプトの実行パスを基点として、パスが示す同一サーバー内のリソースの取得を試みる。
+// 	外部リソースの取り扱いにまつわる様々な制約を回避するために、取得したリソースは実行パス上に追加される <iframe> でインラインで展開される。
+// 	これは、リソースが実行元とは異なる階層に存在していて、リソース内に相対パスが含まれる場合、リソースが正常に動作しないことを意味する。
+// 	この構文が取得するのは画像などのメディアではなくドキュメント構造上に存在する情報なので、リソースが静的な HTML であれば問題が表面化しないが、
+// 	外部リソースの JavaScript などで動的に情報を読み込むページの場合、求める情報を得ることはできないだろう。
+// 	このように、HTML や JavaScript に課せられた制約のため、提供される機能が実用に至るケースはそれほど多くないか、ほとんどないと思われる。
+// 	URL に指定した文字列は、Strings.prototype.get で再帰的に解析される。
+// 	これは例えば機械的に生成された規則的な URL 上のページの情報にアクセスする際に有用となるだろう。
+// 	URL を指定する時、URL が不特定多数である場合、第四引数に URL にアクセスする間隔をミリ秒で指定できる
+// 	例えば URL が 0.html, 1.html で、第四引数が 500 の場合、0.html を取得後、0.5 秒後に 1.html への要求を開始する。
+// 	自然数以外の値、例えば -1 を指定すると、すべての URL に同時平行してアクセスする。
+// 	これは URL の数によってはサーバーに損害を与えかねないので、ローカルサーバーに対してなどに対してでなければ決して推奨されない。
+// 	この値は、既定では 1000 ミリ秒に設定される。
+// 	第五引数はリクエストのタイムアウトを待つ時間で、ミリ秒で指定する。設定した時間内にリクエストが完了しなければ、リクエストは強制的に中断され、
+// 	その URL が示す情報は未指定として扱われる。既定では 30000 ミリ秒に設定される。
+// 	
 // (...)
 // 	括弧内のコンマで区切られた値で分岐させる。値間は | で区切る。
 // 	この中の値は、Strings.get を再帰して処理される。
 // 	そのため、文字列の指定は ' で囲わずに行なう必要がある。
 // 	そして再帰されるため、任意の構文を必要に応じて使用することができる。
 // 	再帰前にラベル付けした値も再帰先から参照できる。（ただし再帰先で同名のラベルを付けた場合、再帰前の同名ラベルはそのラベルの値で上書きされる）
-// :, ;
-// 	[labeled: ...] のように、各括弧内の行頭から : ないし ; までの間はラベルとして認識される。
-// 	ラベルを : で閉じた場合、その括弧の値はその場で展開されると同時にラベル付けされて記録もされる。
-// 	ラベルを ; で閉じた場合、その括弧の値はラベル付けされて後方参照が可能になるが、その場での展開はされない。
+// ::, ;:
+// 	[labeled:: ...] のように、各括弧内の行頭から :: ないし ;: までの間はラベルとして認識される。
+// 	ラベルを :: で閉じた場合、その括弧の値はその場で展開されると同時にラベル付けされて記録もされる。
+// 	ラベルを ;: で閉じた場合、その括弧の値はラベル付けされて後方参照が可能になるが、その場での展開はされない。
 // 	ラベル付けされた値を再利用するには、それより後方で下記構文 *...* を使う。
 // 	なお、実際には、すべての構文にラベルが暗黙に割り当てられる。
 // 	明示的にラベルを指定していない構文に対しては、ただの文字列も含め、全体の左から数えたその構文の位置が便宜的なラベルになる。
 // 	例えば "a(b|c)d*1**2*"の場合、生成される文字列は [ 'abdbd', 'abdcd', 'acdbd', 'acdcd' ] である。
-// 	この出力は、明示的にラベル付けした "a(1:b|c)(2:d)*1**2*" の出力と等価である。
+// 	この出力は、明示的にラベル付けした "a(1::b|c)(2::d)*1**2*" の出力と等価である。
 // *...*
 // 	ラベル名をアスタリスクで囲んだものは、そのラベルの値で代替される。
 // 	この構文を使用する時、ラベル名の先頭に / を付けると、ラベル付けされた値の適用方法を切り替える。
@@ -940,9 +961,9 @@ export class ParseHelper {
 // 	ラベル付けされた値は不足に達した時点でラベル付けされた値内を周回して不足分を補う。
 // 	以下は動作モードの違いによる出力の例。
 // 	labeled = [ 0, 1, 2 ], strings = [ 'a', 'b', 'c', 'd', 'e' ]
-// 	Strings.get("[labeled;0,2,1]['a','e',1]*labeled*");
+// 	Strings.get("[labeled;:0,2,1]['a','e',1]*labeled*");
 // 		// [ 'a0', 'a1, 'a2', 'b0', 'b1', 'b2', 'c0', 'c1, 'c2', 'd0', 'd1, 'd2', 'e0', 'e1, 'e2' ]
-//		Strings.get("[labeled;0,2,1]['a','e',1]*/labeled*");
+//		Strings.get("[labeled;:0,2,1]['a','e',1]*/labeled*");
 // 		// [ 'a0', 'b1, 'c2', 'd0', 'e1' ]
 // `...`
 // 	括弧中の文字列を JavaScript として実行し、return によって返された値を戻り値として使う。
@@ -978,7 +999,7 @@ export class ParseHelper {
 // エスケープも含め、上記の構文文字は任意の文字に変更しようと思えばできなくはないが、一切動作検証していないので強く推奨しない。
 
 // 使用例:
-// 	Strings.get("a`return '0'+1;`[label:0,5,1,5,'_',2,'_']<'#id[id=\"sample\"]', 'textContent'>(a|b)*label*");
+// 	Strings.get("a`return '0'+1;:`[label:0,5,1,5,'_',2,'_']<'#id[id=\"sample\"]', 'textContent'>(a|b)*label*");
 export class Strings extends ParseHelper {
 	
 	static descriptor = {
@@ -1070,6 +1091,24 @@ export class Strings extends ParseHelper {
 		},
 		selector(inner, block, parsed, plot, plotLength, input, detail, splice, deletes, self) {
 			
+			const	args = this.or.split(inner, ...this.frkArgHierarchy.getMasks(inner).masks),
+					addr = detail.addr,
+					urls = args.length > 1 && (delete detail.addr, this.get(args[0], detail)),
+					params = this.getArgs(args[+!!urls], (detail.addr ||= addr, detail), this.argHierarchy),
+					propertyName = params?.[1]?.split('.') ?? [ '', 'textContent' ];
+			
+			return {
+				urls,
+				selector: params?.[0],
+				propertyName: propertyName[0] || (propertyName.shift(), propertyName),
+				rxSrc: params?.[2],
+				interval: params?.[3] || 1000,
+				timeout: params?.[4] || 30000
+			};
+			
+		},
+		selector_(inner, block, parsed, plot, plotLength, input, detail, splice, deletes, self) {
+			
 			const	args = this.getArgs(inner, detail, this.argHierarchy),
 					arg = args?.[1]?.split('.') ?? [ '', 'textContent' ];
 			
@@ -1105,6 +1144,8 @@ export class Strings extends ParseHelper {
 			//{ name: 'dup', term: [ '^', '^' ] }
 		]
 	];
+	static stored = ';:';
+	static labeled = '::';
 	
 	constructor() {
 		
@@ -1117,7 +1158,11 @@ export class Strings extends ParseHelper {
 		this.argHierarchy = new Terms(this.str, this.re, this.evl),
 		this.frkArgHierarchy = new Terms(...this.argHierarchy, this.frk),
 		
-		this.lbl = new Chr(/^(.*?)(;|:)/g, undefined, esc),
+		this.lbl = new Chr(
+				new RegExp(`^(.*?)(${Unit.escapeRegExpStr(Strings.stored)}|${Unit.escapeRegExpStr(Strings.labeled)})`, 'g'),
+				undefined,
+				esc
+			),
 		this.reFlag = '/',
 		
 		// dot, cmm = comma, or, idt = identify for labeled value
@@ -1185,7 +1230,7 @@ export class Strings extends ParseHelper {
 		
 		return {
 				label: label && label[1],
-				registers: label?.[2] === ';',
+				registers: label?.[2] === Strings.stored,
 				strLocs: labeled ? str.locate(inner = inner.substring(label.index + label[0].length)).completed : sLocs,
 				evlLocs: labeled ? evl.locate(inner).completed : eLocs,
 				inner
@@ -1510,15 +1555,140 @@ export class Composer {
 		
 	}
 	
+	// 第一引数 urls に指定された配列の要素が示すべき URL にアクセスし、
+	// 取得した HTML を(HTML であるべき) <iframe> に読み込み、
+	// 展開されたドキュメントの第二引数 selector に一致するすべての要素から、第三引数 propertyName に指定された属性値ないしプロパティを取得する。
+	// 取得した値は第六引数 values に指定された配列に列挙される Promise を通じて渡される。
+	// urls が偽を示す時は、このオブジェクトが属するドキュメントに対して上記の処理を同期処理で行なう。
+	// つまり、values の要素には Promise ではなく取得した値がそのまま設定される。
+	// 第四引数 interval に自然数が設定された時、非同期で行なわれる値の取得処理は、
+	// urls に指定された URL 順に、ひとつ処理が完了する毎に intervals で指定したミリ秒待機後、次の要素へ移行するのを urls の末尾まで繰り返す。
+	// 一方 values には戻り値に渡された時点ですべての要素に Promise が設定されている。
+	// 正しく動作すればこの values の末端の Promise の解決がすべての要素の解決を意味することになる。
+	// intervals に自然数以外の値（既定値）を指定すると、すべての URL 先に同時平行してアクセスする。
+	// 第五引数 timeout に自然数が設定されると、それをミリ秒として、timeout までに HTML の取得ができなければ
+	// 強制的にその通信を中断し、該当の Promise を拒否する。timeout は、既定では 30 秒に設定される。
+	// URL 先のドキュメントを、ブラウザーからウェブページへアクセスするのとまったく同じに、実際に完全にブラウザー上で展開するため、
+	// URL の数が多ければ多いほどパフォーマンスの問題が生じる。
+	// また intervals に指定する値が小さければ、アクセス先に経済的なものも含む深刻な損害を与えかねない点に注意しなければならない。
+	// こうした問題を踏まえた上で実行し、実際にアクセスに成功しても、期待した結果は得られないかもしれない。
+	// 特に動的にリソースを読み込むページ上の情報はほとんど正確な結果は期待できない。
+	// このメソッドは、まず対象の URL が示す HTML を文字列として取得したあと、
+	// このスクリプトを読み込んだページ上に追加した iframe の属性 srcdoc にそれを指定する。
+	// つまり HTML の絶対パスは、このスクリプトの実行パスになり、HTML が異なる階層に存在していた場合、HTML 内のすべての相対パスに不整合が生じるのである。
+	// このメソッドが期待する結果を返すのは、概ね静的なページに対してのみである。
+	// これは W3C の定める同一オリジンポリシーによる制限で、サーバーと連携するか、拡張機能上でなければ回避することはできない。
+	//
+	// 入れ子状の Promise が複雑に接続しており、匿名関数を通じたコールバック関数の作成の多用と、
+	// 特定の箇所で Promise を生成元外で解決している点を踏まえなければ、履行の追跡は難しいと思われる。
+	//
+	// 以下は旧解説。
 	// 第一引数 selector に指定した文字列を、document.querySelectorAll の第一引数にし、
 	// 選択されたすべての要素から、第二引数 propertyName に指定したプロパティの値を取得し、
 	// それを第三引数 values に指定した配列に追加する。
-	static select(selector = ':root', propertyName = [ 'innerHTML' ], values = []) {
+	static select(urls, selector = ':root', propertyName = [ 'innerHTML' ], rxSrc, interval = -1, timeout = 30000, values = []) {
 		
-		const	nodes = document.querySelectorAll(selector),
-				l = nodes.length,
+		if (urls) {
+			
+			Array.isArray(urls) || (urls = [ urls ]);
+			
+			const	URLs = [], l = urls.length, current = location.origin + location.pathname,
+					awaits = (interval = interval|0) > -1;
+			let i;
+			
+			i = -1;
+			while (++i < l) {
+				
+				// 引数 intervals が有効で、かつ urls の数が多い時、恐らくすさまじい数の Promise のネストが発生するだろう。
+				// await を使えばいいかもしれないが、Strings.prototype.get を非同期関数にすることによって生じる影響を検討する気になれない。
+				
+				values[i] = awaits > -1 && i ? 
+					values[i - 1].then((url => () => new Promise(rs => setTimeout(() => Composer.promiseRemoteSelector(url, current, selector, propertyName, rxSrc, timeout).catch(error => error).then(v => rs(v)), interval)))(urls[i])) :
+					Composer.promiseRemoteSelector(urls[i], current, selector, propertyName, rxSrc, timeout);
+				
+			}
+			
+			return values;
+			
+			//while (++i < l) values[i] = new Promise((v => (rs, rj) => {
+			//		const ac = new AbortController();
+			//		fetch(new URL(v, current)+'', { signal: ac.signal }).
+			//			then(response => rs(response)).catch(error => rj(error)),
+			//		timeout && setTimeout(() => (ac.abort(), rj(Error('timeouted'))), timeout);
+			//	})(values[i])).
+			//		then(response => response.text()).
+			//			finally(v => v instanceof Error ? v : Composer.remoteSelector(v, selector, propertyName, values));
+			//	
+			//}
+			
+		} else {
+			
+			return Composer.getNodesValue(document.querySelectorAll(selector), propertyName, rxSrc, values);
+			
+		}
+		
+	}
+	static promiseRemoteSelector(url, current, selector, propertyName, rxSrc, timeout, values = []) {
+		
+		const ac = new AbortController();
+		
+		console.info('[Strings]', 'LOAD', url);
+		
+		return new Promise((rs, rj) => {
+				const ac = new AbortController();
+				fetch(new URL(url, current)+'', { signal: ac.signal }).
+					then(response => rs(response)).catch(error => rj(error)),
+				timeout && setTimeout(() => (ac.abort(), rj(Error('timeouted'))), timeout);
+			}).
+				then(response => response.text()).catch(error => error).
+					then(v => v instanceof Error ? v : Composer.remoteSelector(v, selector, propertyName, rxSrc, values));
+		
+	}
+	static remoteSelector(html, selector, propertyName, rxSrc, values) {
+		
+		let resolver;
+		const iframe = document.createElement('iframe'),
+				// https://developer.mozilla.org/ja/docs/Web/API/crypto_property
+				signature = crypto.getRandomValues(new Uint32Array(1)).join(),
+				messenger = `<script>
+						const	loaded = event => {
+												removeEventListener('message', loaded),
+												postMessage(
+													{
+														signature: '${signature}',
+														values:	(${Composer.getNodesValue.toString().replace(new RegExp(`^${Composer.getNodesValue.name}`), 'function')})
+																		(document.querySelectorAll('${selector}'), ${JSON.stringify(propertyName)}, ${JSON.stringify(rxSrc || null)})
+													},
+													'${location.origin}'
+												)
+											};
+						addEventListener('DOMContentLoaded', loaded);
+					</script>`,
+				promise = new Promise (rs => resolver = rs),
+				received = message => message.data?.signature === signature && (
+						iframe.contentWindow.removeEventListener('message', received),
+						iframe.remove(),
+						values.push(...message.data.values),
+						resolver(values)
+					),
+				loaded = event => (
+						iframe.removeEventListener(event.type, loaded),
+						iframe.contentWindow.addEventListener('message', received)
+					);
+		
+		iframe.addEventListener('load', loaded),
+		iframe.srcdoc = html + messenger,
+		document.body.appendChild(iframe);
+		
+		return promise;
+		
+	}
+	static getNodesValue(nodes = [], propertyName = [ 'innerHTML' ], rxSrc, values = []) {
+		
+		const	l = nodes.length,
 				requiresAttr = typeof propertyName === 'string',
-				pl = propertyName?.length;
+				pl = propertyName?.length,
+				rx = rxSrc && new RegExp(rxSrc);
 		let i,i0, vl, v;
 		
 		if (!l || !(requiresAttr || pl)) return values;
@@ -1542,6 +1712,13 @@ export class Composer {
 				values[++vl] = v;
 				
 			}
+			
+		}
+		
+		if (rx) {
+			
+			i = -1, vl = values.length;
+			while (++i < vl) values[i] = rx.exec(values[i])?.[0] || '';
 			
 		}
 		
@@ -1569,13 +1746,15 @@ export class Composer {
 	
 	// parts の中に Promise を生成する記述子が含まれる場合、この関数は、合成された文字列を列挙する配列で解決される Promise を返す。
 	// そうでない場合は合成された文字列を列挙する配列を返す。
-	// この関数はそのどちらが返るかを戻り値以外から知らせることはないが、
-	// 使用者は引数に与えた値からそのどちらが返るかを事前に知ることが可能である。（あるいは可能であるべきである）
-	static compose(parts) {
+	// 第二引数 promises に真を示す値を指定すると、この関数は常に上記の値で解決する Promise を返す。
+	static compose(parts, promises) {
 		
-		const composer = Composer.getComposer(parts), { done, value } = composer.next();
+		const	composer = Composer.getComposer(parts),
+				{ done, value } = composer.next(),
+				composed =	done ? value : value instanceof Promise ?
+									(promises = false, value.then(() => composer.next().value)) : composer.next().value;
 		
-		return done ? value : value instanceof Promise ? value.then(() => composer.next().value) : composer.next().value;
+		return promises ? Promise.resolve(composed) : composed;
 		
 	}
 	// 第一引数 parts に指定された配列に列挙した記述子に基づいて任意の文字列を任意の数生成し、
@@ -1606,25 +1785,24 @@ export class Composer {
 	// 同じように、every を持つ記述子が 0,1,2,3 を生成する場合、合成される文字列は 00,11,22 になる。
 	static *getComposer(parts) {
 		
-		let resolver;
+		let i,i0,l0,pi,pl, p, nodes,propertyName, composed, neglects, source, resolver;
 		const	l = (Array.isArray(parts) ? parts : (parts = [ parts ])).length, URLs = [],
 				values = [], snapshots = [], sources = [],
 				errored = Symbol(),
 				promise = new Promise(rs => resolver = rs),
-				promised = (v, sym, snapshot, source) => {
+				promised = (v, promise, snapshot, source) => {
 					
-					const i = snapshot.indexOf(sym);
+					const i = snapshot.indexOf(promise);
 					
 					i === -1 || (
 						v === errored ?	(snapshot.splice(i, 1), source && source.splice(i, 1)) :
 												(snapshot[i] = v, source && (source[i] = v))
 					),
-					++pi === pl && resolver();
+					++pi === pl && (snapshot.flat(1), source && source.flat(1), resolver());
 					
 				};
-		let i,i0,l0,pi,pl, p, nodes,propertyName, composed = [], neglects, source;
 		
-		i = -1, pi = pl = 0;
+		i = -1, pi = pl = 0, composed = [];
 		while (++i < l) {
 			
 			switch (typeof (p = parts[i])) {
@@ -1652,7 +1830,7 @@ export class Composer {
 				
 				if (p.selector) {
 					
-					Composer.select(p.selector, p.propertyName, values);
+					Composer.select(p.urls, p.selector, p.propertyName, p.rxSrc, p.interval, p.timeout, values);
 					
 				} else if ('from' in p || 'to' in p || 'value' in p)
 					Composer.increase(p?.from ?? 0, p?.to ?? 1, p?.value ?? 1, values);
@@ -1676,14 +1854,14 @@ export class Composer {
 			i0 = -1, l0 = values.length;
 			while (++i0 < l0) values[i0] instanceof Promise && (
 					++pl,
-					values[i0].then(v => v).catch(error => errored).finally(((sym, ss, src) => v => promised(idx, sym, ss, src))(snapshots[i][i0] = Symbol(), snapshots[i], sources[i]))
+					values[i0].then(v => v).catch(error => (console.error(error), errored)).then(((promise, ss, src) => v => promised(v, promise, ss, src))(values[i0], snapshots[i], sources[i]))
 				);
 			
 			values.length = 0, neglects = null;
 			
 		}
 		
-		pi && (yield promise),
+		pl && (yield promise),
 		
 		i = -1;
 		while (++i < l) {
@@ -1741,37 +1919,6 @@ export class Composer {
 		
 		
 		return container;
-		
-	}
-	
-}
-class Agent {
-	
-	get(url, rx) {
-		
-		return new Promise((rs, rj) => {
-			
-			fetch('index.html').then(data=>data.text()).then(text => {
-					
-					const iframe = document.createElement('iframe'),
-							post = `<script>addEventListener('message', e=>{
-								const elements = document.querySelectorAll(e.data);
-							});</script>`;
-					
-					iframe.srcdoc = text + post;
-					iframe.addEventListener(
-						'load',
-						() => {
-							iframe.contentWindow.postMessage('hi', location.origin),
-							iframe.contentWindow.addEventListener('message', e => rs(e.data));
-						}
-					),
-					
-					document.body.appendChild(iframe);
-					
-				});
-			
-		});
 		
 	}
 	
