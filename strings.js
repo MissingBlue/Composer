@@ -979,14 +979,24 @@ export class ParseHelper {
 // 	例えば "a(b|c)d*1**2*"の場合、生成される文字列は [ 'abdbd', 'abdcd', 'acdbd', 'acdcd' ] である。
 // 	この出力は、明示的にラベル付けした "a(1:;b|c)(2:;d)*1**2*" の出力と等価である。
 //
-// 	:; ;; いずれの場合も、<label:=; ...> のように、二つの記号の間に特定の文字列を指定して構文の挙動を変更することができる。現状は以下に対応する。
-// 		=
+// 	:; ;; いずれの場合も、<label:>=; ...> のように、二つの記号の間に特定の文字列(オプション)を指定して構文の挙動を変更することができる。
+// 	オプションは空白で区切り複数指定可能だが、現状はいずれのオプションも排他関係にある。
+// 	*実際に行なうかどうかはともかく、破壊的な改修を伴う変更の余地がある。例えば引数を受け付けるオプションを指定できれば柔軟性が向上する
+// 		>=
 // 			構文によって生成された文字列が前方までに生成された文字列より少ない場合、前方の数に達するまで生成された文字列を繰り返して補われる。
-// 			例えば "['a','c',1][:=;'a','b',1]" は 'aa', 'bb', 'ca' を生成する。
+// 			例えば "['a','c',1][:>=;'a','b',1]" は 'aa', 'bb', 'ca' を生成する。
 // 			一方、構文の生成文字列が前方までの生成文字列を超過する場合、構文の生成文字列は前方までのそれの数に切り詰められる。
-// 			['a','c',1][:=;'a','d',1] は 'aa', 'bb', 'cc' を生成する。
+// 			['a','c',1][:>=;'a','d',1] は 'aa', 'bb', 'cc' を生成する。
+// 		<=
+// 			>= の逆を行なう。
+// 			"['a','c',1][:<=;'a','b',1]" は [ 'aa', 'bb' ] を生成する。
+// 			"['a','c',1][:<=;'a','d',1]" は [ 'aa', 'bb', 'cc', 'ad' ] を生成する。
 // *...*
 // 	ラベル名をアスタリスクで囲んだものは、そのラベルの値で代替される。
+// 	(...) などでネストした時も、ネスト先から上位のラベルを参照できるが、若干同一階層間で参照した時と挙動が異なる。
+// 	同一階層の時、参照する値は、参照元で生成した実際の値をそのまま再利用する。つまり生成処理は繰り返されない。
+// 	一方、異なる階層間で参照すると、生成後の値を参照するのではなく、生成前の記述子を参照し、それを実際の生成処理に用いる。
+// 	つまりまったく同じ値を作成する処理を繰り返す。それ以外にも違いがある可能性はゼロではないが今のところ未確認。
 // 	以下は廃止。代替は *:=;...*
 // 	この構文を使用する時、ラベル名の先頭に / を付けると、ラベル付けされた値の適用方法を切り替える。
 // 	/ なしの場合、値は それ以前に生成されたすべての文字列 * ラベル付けされた値が持つ文字列の数 分生成される。
@@ -1158,8 +1168,16 @@ export class Strings extends ParseHelper {
 		ech: Symbol(),
 		clc: Symbol(),
 		
+		backwards: Symbol(),
 		every: Symbol()
 		
+	};
+	static labeled = ':';
+	static stored = ';';
+	static flagged = ';';
+	static flag = {
+		backwards: '<=',
+		every: '>='
 	};
 	static hierarchy = [
 		{ name: Strings.sym.str, term: [ "'", "'" ], super: true },
@@ -1175,12 +1193,6 @@ export class Strings extends ParseHelper {
 			//{ name: 'dup', term: [ '^', '^' ] }
 		]
 	];
-	static labeled = ':';
-	static stored = ';';
-	static flagged = ';';
-	static flag = {
-		every: '='
-	};
 	
 	constructor() {
 		
@@ -1203,7 +1215,7 @@ export class Strings extends ParseHelper {
 			[
 				/^/g,
 				new RegExp(`(?:${Unit.escapeRegExpStr(Strings.stored)}|${Unit.escapeRegExpStr(Strings.labeled)})`, 'g'),
-				Strings.flagged
+				Unit.escapeRegExpStr(Strings.flagged)
 			],
 			esc
 		),
@@ -1240,13 +1252,15 @@ export class Strings extends ParseHelper {
 			return block;
 		}
 		
-		const { label, stores, every, inner } = this.parse(block.inners[0], this.unlabels.indexOf(block.captor) !== -1);
+		const	{ label, stores, every, backwards, inner } =
+					this.parse(block.inners[0], this.unlabels.indexOf(block.captor) !== -1);
 		let i,i0,l0, args, v,vi, arg;
 		
 		detail.addr[l] = label || ''+l;
 		v = this.map.get(block.captor)?.(inner, ...arguments) ?? inner,
 		label && (detail.v[label] = v),
-		every && typeof v === 'number' ? (v = -v) : v && typeof v === 'object' && (v[Strings.sym.every] = every);
+		every && typeof v === 'number' ? (v = -v) : v && typeof v === 'object' && (v[Strings.sym.every] = every),
+		backwards && v && typeof v === 'object' && (v[Strings.sym.backwards] = backwards);
 		
 		return stores ? { neglect: v } : v;
 		
@@ -1268,12 +1282,14 @@ export class Strings extends ParseHelper {
 		
 		let sLocs;
 		const	eLocs = this[Strings.sym.evl].locate(inner, sLocs = this[Strings.sym.str].locate(inner).completed).completed,
-				param = !unlabels && this.prm.locate(inner, sLocs, eLocs).completed?.[0];
+				param = !unlabels && this.prm.locate(inner, sLocs, eLocs).completed?.[0],
+				settings = param && param.splitted[3].split(' ');
 		
 		return {
 				label: param?.splitted?.[1],
 				stores: param?.splitted?.[2][0] === Strings.stored,
-				every: param && param.splitted[3].indexOf(Strings.flag.every) !== -1,
+				backwards: settings && settings.indexOf(Strings.flag.backwards) + 1,
+				every: settings && settings.indexOf(Strings.flag.every) + 1,
 				strLocs: param ? (sLocs = this[Strings.sym.str].locate(inner = inner.substring(param.ro)).completed) : sLocs,
 				evlLocs: param ? this[Strings.sym.evl].locate(inner, sLocs).completed : eLocs,
 				inner
@@ -1785,6 +1801,17 @@ export class Composer {
 		return targets;
 		
 	}
+	static everyReverse(targets, values) {
+		
+		const l = values.length, l0 = targets.length, v = [];
+		let i;
+		
+		i = -1;
+		while (++i < l) v[i] = targets[i - parseInt(i / l0) * l0] + values[i];
+		
+		return v;
+		
+	}
 	
 	// parts の中に Promise を生成する記述子が含まれる場合、この関数は、合成された文字列を列挙する配列で解決される Promise を返す。
 	// そうでない場合は合成された文字列を列挙する配列を返す。
@@ -1827,7 +1854,7 @@ export class Composer {
 	// 同じように、every を持つ記述子が 0,1,2,3 を生成する場合、合成される文字列は 00,11,22 になる。
 	static *getComposer(parts) {
 		
-		let i,i0,l0,pi,pl, p, nodes,propertyName, composed, neglects, source, resolver, every;
+		let i,i0,l0,pi,pl, p, nodes,propertyName, composed, neglects, source, resolver, every,backwards;
 		const	l = (Array.isArray(parts) ? parts : (parts = [ parts ])).length, URLs = [],
 				values = [], snapshots = [], sources = [],
 				errored = Symbol(),
@@ -1916,9 +1943,12 @@ export class Composer {
 				
 				every || (source = [ ...source ]);
 				
-			} else if (parts[i] && typeof parts[i] === 'object') every = parts[i][Strings.sym.every];
+			} else if (parts[i] && typeof parts[i] === 'object') {
+				backwards = parts[i][Strings.sym.backwards],
+				every = parts[i][Strings.sym.every];
+			}
 			
-			composed = Composer[every ? 'every' : 'mix'](composed, source);
+			composed = Composer[backwards ? 'everyReverse' : every ? 'every' : 'mix'](composed, source);
 			
 		}
 		
