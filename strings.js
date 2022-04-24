@@ -199,6 +199,9 @@ export class Sequence extends Unit {
 	
 }
 
+// 実際にそれに置き換えられるか、置き換える意義があるのかはともかくとして、
+// 特定のメソッドが Symbol の静的プロパティに置き換えられるかは、安定性や保守性の向上、コードの短絡化の観点から検討する価値があると思われる。
+// https://developer.mozilla.org/ja/docs/Web/JavaScript/Reference/Global_Objects/Symbol#static_properties
 export class Chr extends Unit {
 	
 	static unit = '#';
@@ -324,7 +327,8 @@ export class Term extends Array {
 		return a?.[0]?.lo === null ? -1 : b?.[0]?.lo === null ? 1 : a?.[0]?.lo - b?.[0]?.lo;
 	}
 	static sortLoc(a, b) {
-		return a.lo === null ? -1 : b.lo === null ? 1 : a.lo - b.lo;
+		return a.lo === null ? -1 : b.lo === null ? 1 : a.lo - b.lo ||
+			('outer' in a ? a.outer.length - b.outer.length : a.$.length - b.$.length) || 1;
 	}
 	// 第一引数 str の中から、第二引数 l と第三引数 r の間にある文字列を特定し、その位置など、それに関する情報を返す。
 	// Term.prototype.locate の戻り値を任意の数だけ第四引数 masks 以降に指定すると、
@@ -373,16 +377,10 @@ export class Term extends Array {
 		
 		if (!dl) return [ str ];
 		
-		const locs = [];
-		let i,i0,l0,li, datum;
+		const locs = data.flat(1), li = locs.length;
+		let i,i0,l0, datum;
 		
-		i = li = -1;
-		while (++i < dl) {
-			i0 = -1, l0 = (datum = data[i]).length;
-			while (++i0 < l0) locs[++li] = datum[i0];
-		}
-		
-		if (!++li) return [ str ];
+		if (!li) return [ str ];
 		
 		const sl = str.length - 1, result = [], { max, min } = Math;
 		let loc,sub,cursor;
@@ -602,7 +600,7 @@ export class Term extends Array {
 			outers[li] = loc0.outer,
 			term.ri = loc0.ri,
 			term.ro = loc0.ro,
-			term.$ += loc0.inner + loc0.r[0], 
+			term.$ += loc0.inner + loc0.r[0],
 			currentChr = this[++ci], --ll;
 			
 			if (li === limiter) {
@@ -700,7 +698,7 @@ export class Terms extends Array {
 			} else if (term && typeof term === 'object') {
 				
 				masks[++mi] = (term instanceof Term ? term : (k = term?.name, term.target)).locate(str, ...masks).completed,
-				k && (named[k] = hierarchy, k = undefined);
+				k && (named[k] = masks[mi], k = undefined);
 				
 			}
 			
@@ -747,7 +745,7 @@ export class Terms extends Array {
 //
 // 以下覚え書きバックアップ
 // プロパティ
-// 	hierarchy
+// 	[ParseHelper.symbol.hierarchy]
 // 		Term(構文文字)を優先順で列挙した Terms。
 // 	super
 // 		* 記述子を通じて指定できるように変更したため、このオブジェクト自身のコンストラクターで実装される。
@@ -755,13 +753,23 @@ export class Terms extends Array {
 // 		文字列など、構文の範囲（スコープ）ではなく、それを構成する値の範囲を示す Term を指定することを想定。
 // 		プロパティ名の super はこの意味では適切ではないかもしれないが、相応しい名前が思いつかなかったため便宜的に使用。
 // メソッド
-// 	before
-// 	main
-// 	after
+// 	[ParseHelper.symbol.before]
+// 	[ParseHelper.symbol.main]
+// 	[ParseHelper.symbol.after]
 export class ParseHelper {
 	
-	static deletes = Symbol();
-	static passthrough = Symbol();
+	static symbol = {
+		
+		before: Symbol(),
+		main: Symbol(),
+		after: Symbol(),
+		
+		deletes: Symbol(),
+		passthrough: Symbol(),
+		
+		hierarchy: Symbol()
+		
+	};
 	
 	constructor() {
 		
@@ -827,29 +835,30 @@ export class ParseHelper {
 	}
 	*getParser(str, detail = {}) {
 		
-		const	masks = this.hierarchy.getMasks(str).masks, { deletes, passthrough } = ParseHelper;
+		const	hierarchy = this[ParseHelper.symbol.hierarchy],
+				masks = hierarchy.getMasks(str).masks, { deletes, passthrough } = ParseHelper.symbol;
 		let i,l,i0, v;
 		
 		if (Array.isArray(this.super)) {
 			
 			i = -1, l = this.super.length;
-			while (++i < l) (i0 = this.hierarchy.indexOf(this.super[i])) === -1 || masks.splice(i0, 1);
+			while (++i < l) (i0 = hierarchy.indexOf(this.super[i])) === -1 || masks.splice(i0, 1);
 			
 		}
 		
-		const plot = Term.plot(str, ...masks), parsed = [];
+		const plot = Term.plot(str, ...masks), parsed = [], { before, main, after } = ParseHelper.symbol;
 		
 		l = plot.length;
 		
-		if (typeof this.before === 'function') {
+		if (typeof this[before] === 'function') {
 			
-			if ((v = this.safeReturn(this.before(plot, l, str, detail, passthrough, this), l = plot.length, v)) !== passthrough) return v;
+			if ((v = this.safeReturn(this[before](plot, l, str, detail, passthrough, this), l = plot.length, v)) !== passthrough) return v;
 			
 			(v = yield v) && (plot = v);
 			
 		}
 		
-		if (typeof this.main === 'function') {
+		if (typeof this[main] === 'function') {
 			
 			const splice = [];
 			let pi;
@@ -857,7 +866,7 @@ export class ParseHelper {
 			i = pi = -1, l = plot.length;
 			while (++i < l) {
 				
-				v = this.main(plot[i], parsed, plot, l, str, detail, splice, deletes, this);
+				v = this[main](plot[i], parsed, plot, l, str, detail, splice, deletes, this);
 				
 				if (splice.length) {
 					
@@ -881,24 +890,38 @@ export class ParseHelper {
 		(v = yield parsed) && (parsed = v);
 		
 		yield this.safeReturn(
-						typeof this.after === 'function' ?
-							this.after(parsed, parsed.length, plot, l, str, detail, this) : parsed
+						typeof this[after] === 'function' ?
+							this[after](parsed, parsed.length, plot, l, str, detail, this) : parsed
 					);
 		
 	}
 	
 }
 
-// todo:
+// todo: (深刻度順)
+// 	全体的にエラーハンドリングが欠如しすぎている。
+// 	✔️引数に undefined 的なものを指定できるようにする。
+// 		検証は杜撰。引数に undefined を指定したい場合は nai を指定する。
+// 		[0,5,nai] は、第三引数が Composer.increase の既定値の 1 で補われ [0,5,1] になるため、
+// 		戻り値は [ '0', '1', '2', '3', '4', '5' ] になる。
+// 		nai は日本語の「無い」に由来するが、これは null を意識した以上の意味はなく、より必然性の高い語句があればそれに代替すべき。
+// 		そもそも null !== undefined であるため不適切。
 // 	(...) の再帰をほぼ検証していないため動作確認。
-// 	dom で外部 HTML を読み込み。（Same origin 限定）
-// 	すべての構文で括弧内接頭辞 / に対応。
+// 	✔️dom で外部 HTML を読み込み。（Same origin 限定）
+// 		最低限の実用性を持たせようとすると現状でも引数が足りない（特に iframe のサイズを指定できるようにすべき）が、
+// 		一方で一度に指定するには引数の数が多すぎるので、
+// 		なんらかの方法でまとめられる引数はまとめて指定できるようにしないと可読性が落ち、記述するためのコストも上がり続ける。
+// 	✔️すべての構文で括弧内接頭辞 / に対応。（詳細は :; ;; を参照）
 // 	特定の文字列が存在した場合、全体を文字列ではなく生の値で返す。
+// 	各構文にブラックリスト的なものを指定できるようにする。
 //
 // 構文に基づいて文字列を生成する。
 // 構文にエラーハンドリング等は一切実装しておらず、堅牢性はない。
 // エスケープは \\ で行なう。\\(=\) を文字列として使う場合は、\\\\ になる。
 // ' を使う構文があるため、解析の対象文字列は " で囲うことを推奨。
+//
+// 構文構造
+// 	"構文開始文字[[ラベル名](:||;)[フラグ];]([再帰URL||][[[引数], 引数], ...]||[[[再帰]|再帰]|...])構文終了文字"
 //
 // '...'
 // 	シングルクォーテーションで囲まれた値は常に文字列を示す。
@@ -944,26 +967,36 @@ export class ParseHelper {
 // 	そのため、文字列の指定は ' で囲わずに行なう必要がある。
 // 	そして再帰されるため、任意の構文を必要に応じて使用することができる。
 // 	再帰前にラベル付けした値も再帰先から参照できる。（ただし再帰先で同名のラベルを付けた場合、再帰前の同名ラベルはそのラベルの値で上書きされる）
-// ::, ;:
-// 	[labeled:: ...] のように、各括弧内の行頭から :: ないし ;: までの間はラベルとして認識される。
-// 	ラベルを :: で閉じた場合、その括弧の値はその場で展開されると同時にラベル付けされて記録もされる。
-// 	ラベルを ;: で閉じた場合、その括弧の値はラベル付けされて後方参照が可能になるが、その場での展開はされない。
+// 	なお、この構文そのものには (label:=;a|b) のようなラベル付けや挙動の指定はできない。
+// 	この構文で生成する値を再利用するなどしたい場合は (~label:;'a'~|b)*label* などとする
+// :;, ;;
+// 	[labeled:; ...] のように、各括弧内の行頭から :; ないし ;; までの間はラベルとして認識される。
+// 	ラベルを :; で閉じた場合、その括弧の値はその場で展開されると同時にラベル付けされて記録もされる。
+// 	ラベルを ;; で閉じた場合、その括弧の値はラベル付けされて後方参照が可能になるが、その場での展開はされない。
 // 	ラベル付けされた値を再利用するには、それより後方で下記構文 *...* を使う。
 // 	なお、実際には、すべての構文にラベルが暗黙に割り当てられる。
 // 	明示的にラベルを指定していない構文に対しては、ただの文字列も含め、全体の左から数えたその構文の位置が便宜的なラベルになる。
 // 	例えば "a(b|c)d*1**2*"の場合、生成される文字列は [ 'abdbd', 'abdcd', 'acdbd', 'acdcd' ] である。
-// 	この出力は、明示的にラベル付けした "a(1::b|c)(2::d)*1**2*" の出力と等価である。
+// 	この出力は、明示的にラベル付けした "a(1:;b|c)(2:;d)*1**2*" の出力と等価である。
+//
+// 	:; ;; いずれの場合も、<label:=; ...> のように、二つの記号の間に特定の文字列を指定して構文の挙動を変更することができる。現状は以下に対応する。
+// 		=
+// 			構文によって生成された文字列が前方までに生成された文字列より少ない場合、前方の数に達するまで生成された文字列を繰り返して補われる。
+// 			例えば "['a','c',1][:=;'a','b',1]" は 'aa', 'bb', 'ca' を生成する。
+// 			一方、構文の生成文字列が前方までの生成文字列を超過する場合、構文の生成文字列は前方までのそれの数に切り詰められる。
+// 			['a','c',1][:=;'a','d',1] は 'aa', 'bb', 'cc' を生成する。
 // *...*
 // 	ラベル名をアスタリスクで囲んだものは、そのラベルの値で代替される。
+// 	以下は廃止。代替は *:=;...*
 // 	この構文を使用する時、ラベル名の先頭に / を付けると、ラベル付けされた値の適用方法を切り替える。
 // 	/ なしの場合、値は それ以前に生成されたすべての文字列 * ラベル付けされた値が持つ文字列の数 分生成される。
 // 	/ を付けた場合、ラベル付けされた値は単純にそれまで生成された文字列に結合され、ラベル付けされた値の数 < それまでに生成された文字列の数 だった場合、
 // 	ラベル付けされた値は不足に達した時点でラベル付けされた値内を周回して不足分を補う。
 // 	以下は動作モードの違いによる出力の例。
 // 	labeled = [ 0, 1, 2 ], strings = [ 'a', 'b', 'c', 'd', 'e' ]
-// 	Strings.get("[labeled;:0,2,1]['a','e',1]*labeled*");
+// 	Strings.get("[labeled;;0,2,1]['a','e',1]*labeled*");
 // 		// [ 'a0', 'a1, 'a2', 'b0', 'b1', 'b2', 'c0', 'c1, 'c2', 'd0', 'd1, 'd2', 'e0', 'e1, 'e2' ]
-//		Strings.get("[labeled;:0,2,1]['a','e',1]*/labeled*");
+//		Strings.get("[labeled;;0,2,1]['a','e',1]*/labeled*");
 // 		// [ 'a0', 'b1, 'c2', 'd0', 'e1' ]
 // `...`
 // 	括弧中の文字列を JavaScript として実行し、return によって返された値を戻り値として使う。
@@ -992,14 +1025,14 @@ export class ParseHelper {
 // 	指定次第で予期しない巨大な出力を生成する点に注意が必要。
 // 	（一方、リソース不足エラーにより思ったより巨大なデータを得られない点にも気付くかもしれない）
 // ~...~
-// 	この構文内の文字列を式として計算を行ないその結果を文字列にする。暫定的な実装で構文記号含め変更の必要が強い。
-// 	特に構文の優先順位の必然性など確認が不足している。対応しているのは四則演算のみ。
-// 	基本的には使う必要のない構文だが、^...^ でプレースホルダーを使って文字列を生成する時にやや有用。
+// 	この構文内の文字列を式として評価し、その結果を文字列にする。分岐などは行なわない。対応しているのは四則演算のみ。
+// 	^...^ でプレースホルダーを使って文字列を生成したり、(~label:;'a'~|b)*label* などとして分岐する文字列をラベル化するなどの使い方が考えられる。
+// 	便宜的な実装で構文記号含め変更の必要が強い。特に構文の優先順位の必然性など確認が不足している。
 //
 // エスケープも含め、上記の構文文字は任意の文字に変更しようと思えばできなくはないが、一切動作検証していないので強く推奨しない。
 
 // 使用例:
-// 	Strings.get("a`return '0'+1;:`[label:0,5,1,5,'_',2,'_']<'#id[id=\"sample\"]', 'textContent'>(a|b)*label*");
+// 	Strings.get("a`return '0'+1;;`[label:0,5,1,5,'_',2,'_']<'#id[id=\"sample\"]', 'textContent'>(a|b)*label*");
 export class Strings extends ParseHelper {
 	
 	static descriptor = {
@@ -1078,15 +1111,9 @@ export class Strings extends ParseHelper {
 		},
 		recycle(inner, block, parsed, plot, plotLength, input, detail, splice, deletes, self) {
 			
-			// inner[0] === this.reFlag で戻り値を分岐させているが、
-			// 仮に分岐する場合、detail.addr.indexOf(inner) が異なるキーで同じ結果を得ることになる。
-			// これはあり得ないはずなので、indexOf の引数を正規化する改修(inner.replace(this.reFlag, '') のような)が恐らく必要。
+			const v = detail.addr.indexOf(inner);
 			
-			let v;
-			
-			v = detail.addr.indexOf(inner);
-			
-			return v = v === -1 ? '' : inner[0] === this.reFlag ? -v|0 : v;
+			return v === -1 ? inner in detail.v ? detail.v[inner] : '' : v;
 			
 		},
 		selector(inner, block, parsed, plot, plotLength, input, detail, splice, deletes, self) {
@@ -1107,17 +1134,6 @@ export class Strings extends ParseHelper {
 			};
 			
 		},
-		selector_(inner, block, parsed, plot, plotLength, input, detail, splice, deletes, self) {
-			
-			const	args = this.getArgs(inner, detail, this.argHierarchy),
-					arg = args?.[1]?.split('.') ?? [ '', 'textContent' ];
-			
-			return {
-				selector: args?.[0],
-				propertyName: arg[0] ? arg[0] : (arg.shift(), arg)
-			};
-			
-		},
 		calc(inner, block, parsed, plot, plotLength, input, detail, splice, deletes, self) {
 			
 			return ''+this.getArgs(inner, detail, this.argHierarchy)[0];
@@ -1130,22 +1146,41 @@ export class Strings extends ParseHelper {
 	// str = string, re = recycle, evl = eval,
 	// fnc = function(reflection), dom = document object model, amp = amplifier, frk = fork, lbl = label,
 	// ech = echo = dup(old name) = duplicate
+	static sym = {
+		
+		str: Symbol(),
+		re: Symbol(),
+		evl: Symbol(),
+		fnc: Symbol(),
+		dom: Symbol(),
+		amp: Symbol(),
+		frk: Symbol(),
+		ech: Symbol(),
+		clc: Symbol(),
+		
+		every: Symbol()
+		
+	};
 	static hierarchy = [
-		{ name: 'str', term: [ "'", "'" ], super: true },
-		{ name: 're', term: [ '*', '*' ], callback: Strings.descriptor.recycle },
-		{ name: 'evl', term: [ '`', '`' ], callback: Strings.descriptor.eval },
+		{ name: Strings.sym.str, term: [ "'", "'" ], super: true },
+		{ name: Strings.sym.re, term: [ '*', '*' ], callback: Strings.descriptor.recycle },
+		{ name: Strings.sym.evl, term: [ '`', '`' ], callback: Strings.descriptor.eval },
 		[
-			{ name: 'fnc', term: [ '{', '}' ], callback: Strings.descriptor.reflection },
-			{ name: 'dom', term: [ '<', '>' ], callback: Strings.descriptor.selector },
-			{ name: 'amp', term: [ '[', ']' ], callback: Strings.descriptor.consecutiveNumber },
-			{ name: 'frk', term: [ '(', ')' ], callback: Strings.descriptor.fork },
-			{ name: 'ech', term: [ '^', '^' ], callback: Strings.descriptor.echo },
-			{ name: 'clc', term: [ '~', '~' ], callback: Strings.descriptor.calc },
+			{ name: Strings.sym.fnc, term: [ '{', '}' ], callback: Strings.descriptor.reflection },
+			{ name: Strings.sym.dom, term: [ '<', '>' ], callback: Strings.descriptor.selector },
+			{ name: Strings.sym.amp, term: [ '[', ']' ], callback: Strings.descriptor.consecutiveNumber },
+			{ name: Strings.sym.frk, term: [ '(', ')' ], callback: Strings.descriptor.fork },
+			{ name: Strings.sym.ech, term: [ '^', '^' ], callback: Strings.descriptor.echo },
+			{ name: Strings.sym.clc, term: [ '~', '~' ], callback: Strings.descriptor.calc },
 			//{ name: 'dup', term: [ '^', '^' ] }
 		]
 	];
-	static stored = ';:';
-	static labeled = '::';
+	static labeled = ':';
+	static stored = ';';
+	static flagged = ';';
+	static flag = {
+		every: '='
+	};
 	
 	constructor() {
 		
@@ -1154,16 +1189,24 @@ export class Strings extends ParseHelper {
 		// esc = escape
 		const esc = this.esc = new Sequence('\\');
 		
-		this.setGrammar(Strings.hierarchy, esc, this.hierarchy = new Terms(), this.map = new Map()),
-		this.argHierarchy = new Terms(this.str, this.re, this.evl),
-		this.frkArgHierarchy = new Terms(...this.argHierarchy, this.frk),
+		this.setGrammar(Strings.hierarchy, esc, this[ParseHelper.symbol.hierarchy] = new Terms(), this.map = new Map()),
+		this.argHierarchy = new Terms(this[Strings.sym.str], this[Strings.sym.re], this[Strings.sym.evl]),
+		this.frkArgHierarchy = new Terms(...this.argHierarchy, this[Strings.sym.frk]),
 		
-		this.lbl = new Chr(
-				new RegExp(`^(.*?)(${Unit.escapeRegExpStr(Strings.stored)}|${Unit.escapeRegExpStr(Strings.labeled)})`, 'g'),
-				undefined,
-				esc
-			),
-		this.reFlag = '/',
+		this.unlabels = [
+			this[Strings.sym.evl],
+			this[Strings.sym.frk]
+		];
+		
+		// prm = parameter
+		this.prm = new Term(
+			[
+				/^/g,
+				new RegExp(`(?:${Unit.escapeRegExpStr(Strings.stored)}|${Unit.escapeRegExpStr(Strings.labeled)})`, 'g'),
+				Strings.flagged
+			],
+			esc
+		),
 		
 		// dot, cmm = comma, or, idt = identify for labeled value
 		this.dot = new Chr('.', undefined, esc),
@@ -1174,11 +1217,11 @@ export class Strings extends ParseHelper {
 		this.eI = new Chr(/\$I/g, undefined, esc),
 		this.el = new Chr(/\$l/g, undefined, esc),
 		
-		this.expression = new Expression({ str: this.str, evl: this.evl }, esc);
+		this.expression = new Expression({ str: this[Strings.sym.str], evl: this[Strings.sym.evl] }, esc);
 		
 	}
 	
-	before(plot, plotLength, input, detail, passthrough, self) {
+	[ParseHelper.symbol.before](plot, plotLength, input, detail, passthrough, self) {
 		
 		detail.v ||= {}, detail.addr ||= [];
 		
@@ -1186,7 +1229,7 @@ export class Strings extends ParseHelper {
 		
 	}
 	
-	main(block, parsed, plot, plotLength, input, detail, splice, deletes, self) {
+	[ParseHelper.symbol.main](block, parsed, plot, plotLength, input, detail, splice, deletes, self) {
 		
 		let l;
 		
@@ -1197,18 +1240,19 @@ export class Strings extends ParseHelper {
 			return block;
 		}
 		
-		const { label, registers, inner } = this.parse(block.inners[0], block.captor === this.evl);
+		const { label, stores, every, inner } = this.parse(block.inners[0], this.unlabels.indexOf(block.captor) !== -1);
 		let i,i0,l0, args, v,vi, arg;
 		
 		detail.addr[l] = label || ''+l;
 		v = this.map.get(block.captor)?.(inner, ...arguments) ?? inner,
-		label && (detail.v[label] = v);
+		label && (detail.v[label] = v),
+		every && typeof v === 'number' ? (v = -v) : v && typeof v === 'object' && (v[Strings.sym.every] = every);
 		
-		return registers ? { neglect: v } : v;
+		return stores ? { neglect: v } : v;
 		
 	}
 	
-	after(parsed, parsedLength, plot, plotLength, input, detail, self) {
+	[ParseHelper.symbol.after](parsed, parsedLength, plot, plotLength, input, detail, self) {
 		
 		const composed = Composer.compose(parsed), cl = composed.length;
 		let i;
@@ -1222,17 +1266,16 @@ export class Strings extends ParseHelper {
 	
 	parse(inner, unlabels) {
 		
-		const	{ str, evl } = this,
-				sLocs = str.locate(inner).completed,
-				eLocs = evl.locate(inner).completed,
-				label = unlabels || this.lbl.mask(inner, sLocs, eLocs).unmasked?.[0],
-				labeled = label && !unlabels;
+		let sLocs;
+		const	eLocs = this[Strings.sym.evl].locate(inner, sLocs = this[Strings.sym.str].locate(inner).completed).completed,
+				param = !unlabels && this.prm.locate(inner, sLocs, eLocs).completed?.[0];
 		
 		return {
-				label: label && label[1],
-				registers: label?.[2] === Strings.stored,
-				strLocs: labeled ? str.locate(inner = inner.substring(label.index + label[0].length)).completed : sLocs,
-				evlLocs: labeled ? evl.locate(inner).completed : eLocs,
+				label: param?.splitted?.[1],
+				stores: param?.splitted?.[2][0] === Strings.stored,
+				every: param && param.splitted[3].indexOf(Strings.flag.every) !== -1,
+				strLocs: param ? (sLocs = this[Strings.sym.str].locate(inner = inner.substring(param.ro)).completed) : sLocs,
+				evlLocs: param ? this[Strings.sym.evl].locate(inner, sLocs).completed : eLocs,
 				inner
 			};
 		
@@ -1346,6 +1389,11 @@ export class Expression extends ParseHelper {
 		];
 		
 	}
+	static nai(v, left, right, idx, ldx, rdx, parsed, parsedLength, plot, plotLength, input, detail, splice, self) {
+		
+		return [ idx, 1, undefined ];
+		
+	}
 	
 	constructor(term, esc) {
 		
@@ -1355,15 +1403,18 @@ export class Expression extends ParseHelper {
 			'+': Symbol(),
 			'-': Symbol(),
 			'/': Symbol(),
-			'*': Symbol()
+			'*': Symbol(),
+			'nai': Symbol()
 		},
 		this.opsIndex = {
 			[ this.opsSymbol['+'] ]: Expression.add,
 			[ this.opsSymbol['-'] ]: Expression.sub,
 			[ this.opsSymbol['/'] ]: Expression.div,
-			[ this.opsSymbol['*'] ]: Expression.mul
+			[ this.opsSymbol['*'] ]: Expression.mul,
+			[ this.opsSymbol['nai'] ]: Expression.nai
 		},
 		this.precedence = [
+			this.opsSymbol['nai'],
 			this.opsSymbol['/'],
 			this.opsSymbol['*'],
 			this.opsSymbol['-'],
@@ -1399,10 +1450,10 @@ export class Expression extends ParseHelper {
 								(t0 = this[k]) && map.delete(t0),
 								setTermTo(hd, k, t);
 		
-		return this.setGrammar(hd, this.esc, this.hierarchy = new Terms(), map);
+		return this.setGrammar(hd, this.esc, this[ParseHelper.symbol.hierarchy] = new Terms(), map);
 		
 	}
-	main(block, parsed, plot, plotLength, input, detail, splice, deletes, self) {
+	[ParseHelper.symbol.main](block, parsed, plot, plotLength, input, detail, splice, deletes, self) {
 		
 		if (typeof block === 'string') return deletes;
 		
@@ -1412,7 +1463,7 @@ export class Expression extends ParseHelper {
 		
 	}
 	
-	after(parsed, parsedLength, plot, plotLength, input, detail, self) {
+	[ParseHelper.symbol.after](parsed, parsedLength, plot, plotLength, input, detail, self) {
 		
 		const prcdc = this.precedence, l = prcdc.length, splice = Array.prototype.splice;
 		let i,i0,li,ri, op,p,v, lp, spliceArgsLength;
@@ -1581,6 +1632,8 @@ export class Composer {
 	//
 	// 入れ子状の Promise が複雑に接続しており、匿名関数を通じたコールバック関数の作成の多用と、
 	// 特定の箇所で Promise を生成元外で解決している点を踏まえなければ、履行の追跡は難しいと思われる。
+	// 通信処理とは関係のない、戻り値の作成を、他の処理と切り分けて捉えることも重要。
+	// さらに、これらの一連の遅延処理の流れは、この関数群の呼び出し元 Composer.getComposer をまたぎ、一方だけの理解では把握に至れない。
 	//
 	// 以下は旧解説。
 	// 第一引数 selector に指定した文字列を、document.querySelectorAll の第一引数にし、
@@ -1609,17 +1662,6 @@ export class Composer {
 			}
 			
 			return values;
-			
-			//while (++i < l) values[i] = new Promise((v => (rs, rj) => {
-			//		const ac = new AbortController();
-			//		fetch(new URL(v, current)+'', { signal: ac.signal }).
-			//			then(response => rs(response)).catch(error => rj(error)),
-			//		timeout && setTimeout(() => (ac.abort(), rj(Error('timeouted'))), timeout);
-			//	})(values[i])).
-			//		then(response => response.text()).
-			//			finally(v => v instanceof Error ? v : Composer.remoteSelector(v, selector, propertyName, values));
-			//	
-			//}
 			
 		} else {
 			
@@ -1779,13 +1821,13 @@ export class Composer {
 	//
 	// 変更予定:
 	// 記述子の値が数値だった場合は、単にその数値が示す記述子の値で、他の記述子同様に、それまでに生成された文字列毎にすべて合成する。
-	// すべての記述子にプロパティ every が設定でき、それが真を示す値の時は、その記述子が生成する文字列は、それ以前の文字列と順番に結合され、
+	// すべての記述子にプロパティ Strings.sym.every が設定でき、それが真を示す値の時は、その記述子が生成する文字列は、それ以前の文字列と順番に結合され、
 	// 数が満たない場合は生成順を 0 に巻き戻して結合を繰り返し、生成文字列がそれまでの文字列の数を超過する場合はそこで結合を終了する。
 	// 例えばそれまでに生成した文字列が 0,1,2 で、every を持つ記述子が 0,1 だった場合、合成された文字列は 00,11,20 になる。
 	// 同じように、every を持つ記述子が 0,1,2,3 を生成する場合、合成される文字列は 00,11,22 になる。
 	static *getComposer(parts) {
 		
-		let i,i0,l0,pi,pl, p, nodes,propertyName, composed, neglects, source, resolver;
+		let i,i0,l0,pi,pl, p, nodes,propertyName, composed, neglects, source, resolver, every;
 		const	l = (Array.isArray(parts) ? parts : (parts = [ parts ])).length, URLs = [],
 				values = [], snapshots = [], sources = [],
 				errored = Symbol(),
@@ -1870,20 +1912,13 @@ export class Composer {
 			
 			if (typeof (source = sources[i]) === 'number') {
 				
-				if (!Array.isArray(source = snapshots[(i0 = (source = source|0) < 0) ? source * -1 : source])) continue;
+				if (!Array.isArray(source = snapshots[(every = (source = source|0) < 0) ? source * -1 : source])) continue;
 				
-				if (i0) {
-					
-					Composer.every(composed, source);
-					continue;
-					
-				}
+				every || (source = [ ...source ]);
 				
-				source = [ ...source ];
-				
-			}
+			} else if (parts[i] && typeof parts[i] === 'object') every = parts[i][Strings.sym.every];
 			
-			composed = Composer.mix(composed, source);
+			composed = Composer[every ? 'every' : 'mix'](composed, source);
 			
 		}
 		
