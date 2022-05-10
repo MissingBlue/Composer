@@ -32,7 +32,7 @@ export class Indexer {
 			
 			i = i0 = -1;
 			while (++i < l)	(m = matched[i]).captor = this,
-									handles && handler(m, i,l, cacheData) &&
+									(!handles || handler(m, i,l, cacheData)) &&
 										(lastIndices[m.indexed = ++i0] = (indices[i0] = m.index) + m[0].length);
 			
 		}
@@ -49,35 +49,40 @@ export class Unit extends Indexer {
 	
 	// https://qiita.com/HMMNRST/items/4b10dfb621a469034257#-%E5%90%A6%E5%AE%9A%E5%85%88%E8%AA%AD%E3%81%BF
 	static unit = /(?!)/g;
-	static option = 'g';
-	// https://developer.mozilla.org/ja/docs/Web/JavaScript/Guide/Regular_Expressions#escaping
-	static escapeRegExpStr(regExpStr) {
-		return regExpStr.replace(/[.*+?^=!:${}()|[\]\/\\]/g, '\\$&');
-	}
-	static createGlobalRegExpFromString(rx = Unit.unit, option = Unit.option) {
+	static flags = 'g';
+	static escapeRegExpPattern(pattern) {
+		// https://developer.mozilla.org/ja/docs/Web/JavaScript/Guide/Regular_Expressions#escaping
+		return pattern.replace(/[.*+?^=!:${}()|[\]\/\\]/g, '\\$&');
 		
-		return	rx instanceof RegExp ?
-						rx.global ? rx : new TypeError('RegExp must be global.') :
-						new RegExp(
-									Unit.escapeRegExpStr(''+(rx || '')),
-									typeof option === 'string' ? option + (option.indexOf('g') === -1 ? 'g' : '') : 'g'
-								);
+	}
+	static createRegExpG(rx = Unit.unit, flags = Unit.flags) {
+		
+		rx instanceof RegExp || (
+			(rx && typeof rx === 'object') ||
+				(rx = { pattern: Unit.escapeRegExpPattern(''+(rx || '')), unescapes: true, flags }),
+			typeof (flags = 'flags' in rx ? rx.flags : flags) === 'string' ?
+				flags.indexOf('g') === -1 && (flags += 'g') : (flags = 'g'),
+			rx = new RegExp(rx?.unescapes ? rx.pattern : Unit.escapeRegExpPattern(rx.pattern), flags)
+		);
+		
+		if (!rx.global) throw new TypeError('RegExp must be global.');
+		
+		return rx;
 		
 	}
 	
-	constructor(unit, option) {
+	constructor(unit, flags) {
 		
 		super(),
 		
-		this.setUnit(unit, option);
+		this.setUnit(unit, flags);
 		
 	}
-	setUnit(unit, option) {
-		
-		unit = Unit.createGlobalRegExpFromString(unit, option);
+	setUnit(unit, flags) {
 		
 		const last = this.unit;
 		
+		unit = unit instanceof Unit ? unit.unit : Unit.createRegExpG(unit, flags),
 		(last instanceof RegExp && last.flags === unit.flags && last.source === unit.source) || this.clearCache();
 		
 		return this.unit = unit;
@@ -93,11 +98,11 @@ export class Sequence extends Unit {
 		return !('sequence' in match);
 	}
 	
-	constructor(unit, option, repetition) {
+	constructor(unit, flags, repetition) {
 		
-		super(unit, option),
+		super(unit, flags),
 		
-		this.setRepetition(repetition);
+		this.setRepetition((unit && typeof unit === 'object' && unit?.repetition) || repetition);
 		
 	}
 	
@@ -205,25 +210,35 @@ export class Sequence extends Unit {
 export class Chr extends Unit {
 	
 	static unit = '#';
-	static seq = '\\';
 	
-	constructor(unit = Chr.unit, option, seq, seqOption, seqRepetition) {
+	// 既定では、このオブジェクトを通じて文字列の一致判定をした時、
+	// 指定した正規表現が空文字との一致を示しても、
+	// 他の判定に非空文字を含んでいれば一致から空文字を除去する。（一方、空文字しか存在しない場合、それをそのまま返す）
+	// matchesEmpty に真を示す値を指定するとこの挙動が変わり、空文字を含む一致した箇所をすべてそのまま返す。
+	// これらは特定の状況を想定した仕様だが、現在そうした状況に対応しないように方針を変えたためこの引数を使う処理は存在しない。
+	// また空文字と一致する正規表現は、文字列の長さに比例して肥大した戻り値を作成するため、パフォーマンス的に冗長に思われる。
+	constructor(unit = Chr.unit, seq, matchesEmpty) {
 		
-		super(unit, option),
+		super(unit),
 		
-		this.init(unit, option, seq, seqOption, seqRepetition);
+		this.init(undefined, seq, matchesEmpty);
 		
 	}
 	
-	init(unit = Chr.unit, option, seq = Chr.seq, seqOption, seqRepetition) {
+	init(unit = this.unit || Chr.unit, seq = this.seq, matchesEmpty) {
 		
-		if ((this.setUnit(unit, option)).source === this.setSeq(seq, seqOption, seqRepetition).source)
-			new Error('The srouce of "unit" and "seq" must be different.');
+		this.matchesEmpty = matchesEmpty,
+		unit === this.unit || (unit = this.setUnit(unit)),
+		seq === this.seq || (seq = this.setSeq(seq));
+		
+		if (this.unit.source === this.seq?.source) throw new Error('The srouce of "unit" and "seq" must be different.');
+		
+		return this;
 		
 	}
-	setSeq(seq, seqOption, seqRepetition) {
+	setSeq(seq, flags, repetition) {
 		
-		return this.seq = seq instanceof Sequence ? seq : new Sequence(seq, seqOption, seqRepetition);
+		return this.seq = seq ? seq instanceof Sequence ? seq : new Sequence(seq, flags, repetition) : null;
 		
 	}
 	
@@ -231,8 +246,9 @@ export class Chr extends Unit {
 		
 		if (str in this.cache) return this.cache[str];
 		
-		const matched = [ ...str.matchAll(this.unit) ], seqLastIndices = this.seq.index(str, true).lastIndices,
-				handler = m => seqLastIndices.indexOf(m.index) === -1;
+		const	matched = [ ...str.matchAll(this.matchesEmpty ? this.unit : this) ],
+				seqLastIndices = this.seq?.index?.(str, true).lastIndices,
+				handler = seqLastIndices && (m => seqLastIndices.indexOf(m.index) === -1);
 		
 		return this.setCache(matched, handler);
 		
@@ -302,12 +318,18 @@ export class Chr extends Unit {
 		
 	}
 	
-	duplicate() {
+	clone() {
 		
-		return new Chr(this.unit.source, this.unit.flags, this.seq.unit.source, this.seq.unit.flags, this.seq.repetition);
+		const { unit, seq, matchesEmpty } = this;
+		
+		return new Chr(
+				{ pattern: unit.source, flags: unit.flags, unescapes: true },
+				{ pattern: seq.source, flags: seq.flags, repetition: seq.repetition, unescapes: true },
+				matchesEmpty
+			);
 		
 	}
-	isSame(chr) {
+	equals(chr) {
 		
 		if (!(chr instanceof Chr)) return false;
 		
@@ -315,6 +337,25 @@ export class Chr extends Unit {
 		
 		return u.source === u0.source && u.flags === u0.flags &&
 			s.source === s0.source && s.flags === s0.flags && s.repetition === s0.repetition;
+	}
+	
+	// このオブジェクトのインスタンを String.prototype.matchAll の第一引数に与えた時にこのメソッドが実行される。
+	// 一致語句に空文字を含む場合、一致語句すべてが空文字であればそれらを、そうでなければ一致語句の中のすべての空文字を省き、
+	// いずれの場合もイテレーターではなく Array にして返す。
+	[Symbol.matchAll](str) {
+		
+		const matched = [ ...RegExp.prototype[Symbol.matchAll].call(this.unit, str) ];
+		
+		if (!matched) return matched;
+		
+		const l = matched.length, v = [];
+		let i, vi;
+		
+		i = vi = -1;
+		while(++i < l) matched[i][0] && (v[++vi] = matched[i]);
+		
+		return vi === -1 ? matched : v;
+		
 	}
 	
 }
@@ -337,27 +378,31 @@ export class Term extends Array {
 		
 		l || (l = r, r = null),
 		
-		typeof l === 'string' && (l = new Chr(l, undefined, Term.escSeq)),
-		r && typeof r === 'string' && (r = new Chr(r, undefined, Term.escSeq));
+		typeof l === 'string' && (l = new Chr(l, Term.escSeq)),
+		r && typeof r === 'string' && (r = new Chr(r, Term.escSeq));
 		
 		const lI = l.mask(str, ...masks).unmasked, lL = lI.length, locales = [];
 		
 		if (!lL) return locales;
 		
-		const	isSame = r && l.isSame(r), rI = isSame ? lI : (r || l).mask(str, ...masks).unmasked, rL = rI.length;
+		const	equals = r && l.equals(r), rI = equals ? lI : (r || l).mask(str, ...masks).unmasked, rL = rI.length;
 		
 		if (!rL) return locales;
 		
-		const rShift = isSame ? 2 : 1, localedL = [];
-		let i,i0,mi, L,LI, R,RI, locale;
+		const rShift = equals ? 2 : 1, localedL = [];
+		let i,i0,mi,lxi, L,LI, R,RI, locale;
 		
-		i = -1, mi = -1;
+		i = mi = -1;
 		while ((i += rShift) < rL) {
-			i0 = lL, RI = (R = rI[i]).index + (r ? 0 : R[0].length);
-			while (--i0 > -1 && ((L = lI[i0]).index + L[0].length > RI || localedL.indexOf(i0) !== -1));
+			RI = (R = rI[i]).index + (r ? 0 : R[0].length);
+			i0 = lL;
+			while (--i0 > -1 && (((L = lI[i0]).index + L[0].length > RI) || localedL.indexOf(i0) !== -1));
 			if (i0 > -1) {
 				localedL[++mi] = i0,
-				locale = locales[mi] = { l: L, lo: L.index, li: L.index + L[0].length, r: r ? R : R.index, ri: RI, ro: r ? RI + R[0].length : RI },
+				// *o は、一致文字列の一致開始位置、*i は一致終了位置。例えば str.substring(*.*o, *.*i) で一致部分を抜き出せる。
+				// ls は、r の左側にあるすべての l の一致情報。この関数が判定する一致は基本的に最短一致だが、
+				// このプロパティが示す情報を材料に最長一致を組むことができるかもしれない。
+				locale = locales[mi] = { l: L, lo: L.index, li: L.index + L[0].length, ls: lI.slice(0, i0 + 1), r: r ? R : R.index, ri: RI, ro: r ? RI + R[0].length : RI },
 				locale.inner = str.substring(locale.li, locale.ri),
 				locale.outer = str.substring(locale.lo, locale.ro);
 			}
@@ -440,9 +485,9 @@ export class Term extends Array {
 	
 	constructor(...chrs) {
 		
-		const defaultEscSeq = Array.isArray(chrs[0]) ? chrs[1] : undefined;
+		const hasEsc = Array.isArray(chrs[0]), defaultEscSeq = hasEsc ? chrs[1] : undefined;
 		
-		super(...(defaultEscSeq ? chrs[0] : chrs)),
+		super(...(hasEsc ? chrs[0] : chrs)),
 		
 		this.setDefaultEscSeq(defaultEscSeq);
 		
@@ -467,16 +512,8 @@ export class Term extends Array {
 		const gets = arguments[1] === undefined,
 				idx = Number.isInteger(a1 = gets ? a0 : a1) ? a1 > -1 ? a1 : this.length + a1 : this.length - 1;
 		
-		return gets ?	(
-								a0 = this[idx] || a1 || fallback) instanceof Chr ?
-									a0 :
-									(this[idx] = new Chr(a0, undefined, this.escSeq)
-							) :
-							(
-								this[idx] = (a0 ||= fallback) instanceof Chr ?
-									a0 :
-									new Chr(a0, undefined, this.escSeq)
-							);
+		return gets ?	(a0 = this[idx] || a1 || fallback) instanceof Chr ? a0 : (this[idx] = new Chr(a0, this.escSeq)) :
+							(this[idx] = (a0 ||= fallback) instanceof Chr ? a0 : new Chr(a0, this.escSeq));
 		
 	}
 	
@@ -517,7 +554,9 @@ export class Term extends Array {
 		
 		const	l = this.length,
 				many = l > 1,
-				limiter = l / 2|0,
+				//LocalesEndIndex = l / 2|0,
+				LocalesEndIndex = l - +(l > 1) - +(l > 0),
+				//LocalesEndIndex = l * 2 - 1,
 				{ get, sortLoc } = Term,
 				result = { completed: [], incomplete: [], locale: { completed: [], incomplete: [] } },
 				{ completed, incomplete } = result,
@@ -541,12 +580,14 @@ export class Term extends Array {
 			
 		}
 		
-		i = cli = icli = -1, ci = -1, ++ll;
+		i = cli = icli = -1, ci = -1, ++ll, li = 0;
 		while (++i < ll) {
 			
-			if (!i) {
+			// i の値で分岐させていたが、要素が 3 以上の時に正確な値を返さないため、それを修正するために li に変更。
+			// これまで正確な値を返していた時の入力でも変化がないか未検証。
+			if (!li) {
 				
-				last = ((locales = [ loc0 = locs.splice(i, 1)[0] ])[li = 0]).ri,
+				last = ((locales = [ loc0 = locs.splice(i, 1)[0] ])[li]).ri,
 				inners = [ loc0.inner ],
 				splitted = many ? [ loc0.l, loc0.inner, loc0.r ] : [ loc0.l ],
 				outers = [ loc0.outer ],
@@ -587,7 +628,7 @@ export class Term extends Array {
 						term.ri = loc.ri,
 						term.ro = loc.ro,
 						term.$ += loc.inner + loc.r[0],
-						i = -1
+						i = -1, li = 0
 					);
 				
 				continue;
@@ -603,13 +644,13 @@ export class Term extends Array {
 			term.$ += loc0.inner + loc0.r[0],
 			currentChr = this[++ci], --ll;
 			
-			if (li === limiter) {
+			if (li === LocalesEndIndex) {
 				
-				completed[++cli] = term, cLocs.push(...locales), i = -1;
+				completed[++cli] = term, cLocs.push(...locales), i = -1, li = 0;
 				
 			} else if (ll && i === ll - 1) {
 				
-				incomplete[++icli] = term, icLocs.push(...locales), i = -1;
+				incomplete[++icli] = term, icLocs.push(...locales), i = -1, li = 0;
 				
 			};
 			
@@ -624,12 +665,188 @@ export class Term extends Array {
 // Array を継承し、Term を要素に持つ。
 // 要素の Term が示す文字列の位置情報を特定するメソッド Terms.prototype.getMasks を提供する。
 // 取得した位置情報は Term.plot などで使用する。
-// ほぼ単機能のオブジェクトだが、構文解析の設定としての役割を果たし得る。
+// Term は汎用性を意識しているが、Terms は ParseHelper のサブセット的な存在で、それ単体では意味をなさないプロパティやメソッドは多い。
 export class Terms extends Array {
 	
-	constructor(...terms) {
+	static termIndex = Symbol('Terms.termIndex');
+	static unmasks = Symbol('Terms.unmasks');
+	static callback = Symbol('Terms.callback');
+	static deletes = Symbol('Terms.deletes');
+	static splices = Symbol('Terms.deletes');
+	
+	// 内部処理用の関数で、第二引数 source に与えられた配列の中から、第一引数 v に一致する要素の位置を再帰して取得する。
+	// 戻り値は一致した v を列挙する配列で、その配列の、シンボル Terms.termIndex が示すプロパティに v の位置が指定される。
+	static recursiveGet(v, source = this) {
 		
-		super(...terms);
+		if (source.constructor !== Array) return;
+		
+		const index = source.indexOf(v);
+		
+		if (index !== -1) {
+			(source = [ ...source ])[this.termIndex] = index;
+			return source;
+		}
+		
+		const l = source.length, recursiveGet = this.recursiveGet;
+		let i, v0;
+		
+		i = -1;
+		while (++i < l && !(v0 = recursiveGet(v, source[i])));
+		
+		return v0 && v0;
+		
+	}
+	// 内部処理用の関数で、第一引数 callback に指定した値が適切な値であれば、
+	// それを基にして Reflect.apply に指定する引数を順に列挙する配列を返す。
+	//static normalizeTermCallback(callback) {
+	//	
+	//	typeof callback === 'function' && (callback = [ callback ]);
+	//	
+	//	return Array.isArray(callback) && typeof callback[0] === 'function' &&
+	//		(callback.length > 1 && !Array.isArray(callback[2]) && (callback[2] = [ callback[2] ]), callback);
+	//	
+	//}
+	
+	//constructor(precedence, esc, defaultThis, replaceDescriptor) {
+	constructor(configuration) {
+		
+		//this.super = [],
+		//this.callback = new Map(),
+		configuration?.constructor === Object ? (
+				configuration?.terms?.constructor === Array ? super(...configuration.terms) : super(),
+				configuration.precedence &&
+					this.setByPrecedence(configuration.precedence, configuration.esc, configuration.defaultThis, configuration.replacer),
+				this.replaceAll(configuration)
+			) :
+			super(...arguments);
+		
+	}
+	
+	// 第一引数 precedenceDescriptors が示す Term の記述子に基づいて、自身の要素に Term を設定する。
+	// 記述子には以下のプロパティを設定する。
+	// 	name *required
+	// 		Term の名前で、この名前を引数にして、作成した Term を示すインスタンスのプロパティのための Symbol を作成する。
+	// 		name の値は precedenceDescriptors 内で重複しない方が極めて好ましい。
+	// 		文字列と Symbol を指定でき、文字列を指定した場合、その値を第一引数にして作成された Symbol に置き換えられる。
+	// 	term *required
+	// 		Term か、そののメンバーとなる値を配列に列挙して指定する。
+	// 	callback
+	// 		term が一致した時に実行されるコールバック関数とその実行条件を配列に列挙して指定する。
+	// 		配列はそのまま Reflect.apply の引数として用いられる。関数単体で指定することもでき、その場合は関数はインスタンスを主体に実行される。
+	// 	unmasks
+	// 		真を示す値を指定した時、その Term は、各種一致検索で使われた時に、一致の判定を行ない、
+	// 		その結果を後続の Term の一致判定に影響させるが、値そのものは戻り値に含めない。
+	// 		例えば、このプロパティが真を示す値を持つ Term に、後続の Term との一致がすべて囲まれていた場合、戻り値にはいかなる一致情報も含まない。
+	// 	esc
+	// 		Term をエスケープする際の Sequence を指定する。未指定の場合、このメソッドの第二引数に指定された Sequence を使う。
+	// 		このメソッドの第二引数と同じく、null を指定すると、エスケープできない Term を作成する。
+	//
+	// このメソッドは任意に設定する際の煩わしさを軽減するのが目的で、このメソッドを使わなくても同じ設定をすることは可能。
+	setByPrecedence(precedenceDescriptors, esc, defaultThis = this, replacer, terms = this) {
+		
+		Array.isArray(precedenceDescriptors) || (precedenceDescriptors = [ precedenceDescriptors ]);
+		
+		const l = precedenceDescriptors.length;
+		let i,ti,v, pd, term, callback, sym;
+		
+		i = -1, ti = this.length - 1,
+		esc = esc instanceof Sequence ? esc : typeof esc === 'string' ? new Sequence(esc) : null,
+		replacer || typeof replacer === 'object' || (replacer = undefined);
+		while (++i < l) {
+			
+			if (!('name' in (pd = precedenceDescriptors[i]) && 'term' in pd)) continue;
+			
+			if (Array.isArray(pd)) {
+				
+				this[++ti] = this.setByPrecedence(pd, esc, defaultThis, replacer, []);
+				
+			} else if (pd && typeof pd === 'object') {
+				
+				term = this[++ti] = this[typeof pd.name === 'symbol' ? pd.name : Symbol(pd.name)] =
+					(term = replacer && pd.name in replacer ? replacer[pd.name] : pd.term) instanceof Term ?
+						term : new Term(term, 'esc' in pd ? pd.esc : esc),
+				
+				(callback = pd.callback) && (
+						typeof callback === 'function' && (callback = [ callback ]),
+						Array.isArray(callback) && typeof callback[0] === 'function' &&
+							(term[Terms.callback] = callback[0].bind(callback?.[1] ?? defaultThis, ...callback.slice(2)))
+					),
+				pd.unmasks && (term[Terms.unmasks] = true);
+				
+			}
+			
+		}
+		
+		return terms;
+		
+	}
+	
+	// Terms の中から、第一引数 name に一致する値をプロパティ description に持つ Symbol を取得する。
+	// name に一致する Symbol が複数ある場合、一番最初に一致した Symbol を返す。一致が見つからなかった場合 null を返す。
+	symOf(name) {
+		
+		const syms = Object.getOwnPropertySymbols(this), l = syms.length;
+		let i;
+		
+		i = -1;
+		while (++i < l && syms[i].description !== name);
+		
+		return i === l ? null : syms[i];
+		
+	}
+	// symOf と同じだが、name に一致したすべての Symbol を配列に列挙して返すのと、一致が見つからなかった場合、空の配列を返す点が異なる。
+	symsOf(name) {
+		
+		const syms = Object.getOwnPropertySymbols(this), l = syms.length, matched = [];
+		let i,ti;
+		
+		i = ti = -1;
+		while (++i < l) syms[i].description === name && (matched[++ti] = syms[i]);
+		
+		return matched;
+		
+	}
+	termOf(name) {
+		
+		return this[this.symOf(name) || Symbol()];
+		
+	}
+	
+	// 第一引数 source に与えた Object から、symbol 型の名前を持つプロパティの値を、
+	// 実行元の対応する Symbol を名前に持つ要素と置き換える。
+	// 第二引数 any に真を示す値を指定すると、プロパティの名前の型を問わず、source のすべてのプロパティを対象に置き換えを試みる。
+	// この場合、例えばプロパティ名が文字列であれば、その文字列をプロパティ description に持つ Symbol を名前にした要素がそのプロパティの値と置換される。
+	replaceAll(source, any = false) {
+		
+		if (!source || typeof source !== 'object') return;
+		
+		const syms = Object[any ? 'keys' : 'getOwnPropertySymbols'](source), l = syms.length;
+		
+		let i;
+		while (++i < l) this.replace(syms[i], source[syms[i]]);
+		
+	}
+	replace(name, term) {
+		
+		const index = this.indexOfTerm(typeof name === 'symbol' ? name : this.symOf(name));
+		
+		if (index) {
+			
+			const [ unmasks, callback ] = Terms, i = index[Terms.termIndex], last = index[i];
+			
+			unmasks in last &&
+				(term[unmasks] = last[unmasks], delete last[unmasks], term[callback] = last[callback], delete last[callback]);
+			
+			return index[i] = term;
+			
+		} else return null;
+		
+	}
+	indexOfTerm(name) {
+		
+		const term = this[name];
+		
+		return term instanceof Term ? Terms.recursiveGet(term, [ ...this ]) : null;
 		
 	}
 	
@@ -672,46 +889,84 @@ export class Terms extends Array {
 	// 第二引数以下に渡す引数を直接指定することができるのであれば、この関数はまったく必要ない。
 	getMasks(str, ...masks) {
 		
-		const l = this.length, named = {};
-		let i,mi,ml,mi0,ml0,k,i0,l0, term,t0, currentMasks, result,masks0,named0;
+		const l = this.length, any = [ ...masks ];
+		let i,mi,ml,ai,k,i0,l0, term,t0, currentMasks, result;
 		
-		i = -1, mi = masks.length - 1;
+		i = -1, mi = ai = any.length - 1;
 		while (++i < l) {
 			
 			if ((term = this[i]).constructor === Array) {
 				
-				i0 = -1, l0 = term.length, ml = (currentMasks = [ ...masks ]).length - 1;
+				i0 = -1, l0 = term.length, ml = (currentMasks = [ ...any ]).length - 1;
 				while (++i0 < l0) {
 					
 					if (!(t0 = (t0 = term[i0]).constructor === Array ? [ t0 ] : t0 && typeof t0 === 'object' && t0)) continue;
 					
-					mi0 = ml, ml0 = (masks0 = (result = new Terms(t0).getMasks(str, ...currentMasks)).masks).length;
-					while (++mi0 < ml0) masks[++mi] = masks0[mi0];
-					
-					named0 = result.named;
-					for (k in named0) named[k] = named0[k];
+					ai = any.push(...(result = new Terms(t0).getMasks(str, ...currentMasks)).any) - 1,
+					mi = masks.push(...result.masks) - 1;
 					
 				}
 				
 				k = undefined;
 				
-			} else if (term && typeof term === 'object') {
+			} else if (term instanceof Term) {
 				
-				masks[++mi] = (term instanceof Term ? term : (k = term?.name, term.target)).locate(str, ...masks).completed,
-				k && (named[k] = masks[mi], k = undefined);
+				any[++ai] = term.locate(str, ...any).completed,
+				term[Terms.unmasks] || (masks[++mi] = any[ai]);
 				
 			}
 			
 		}
 		
-		return { masks, named };
+		return { masks, any };
+		
+	}
+	//exec(term, defaultValue = '', ...args) {
+	//	
+	//	const callback = term[Terms.callback];
+	//	
+	//	return callback ? Array.isArray(callback[2]) ? Reflect.apply(callback[0], callback[1], [ ...callback[2], ...args ]) : Reflect.apply(callback[0], callback[1], args) : defaultValue;
+	//	
+	//}
+	
+	split(str, separator) {
+		
+		return separator.split(str, ...this.getMasks(str).masks);
+		
+	}
+	
+	plot(str, detail, ...additionalMasks) {
+		
+		if (!(str += '')) return [ str ];
+		
+		const masks = [ ...this.getMasks(str).masks, ...additionalMasks ].flat(1), ml = masks.length;
+		
+		if (!ml) return [ str ];
+		
+		const sl = str.length - 1, result = [], { max, min } = Math, { deletes, splices } = Terms;
+		let i,i0,l0,v, datum, mask,sub,cursor;
+		
+		i = i0 = -1, cursor = 0, masks.sort(Term.sortLoc);
+		while (++i < ml) {
+			cursor <= (mask = masks[i]).lo && (
+				(sub = str.substring(cursor, max((mask = masks[i]).lo, 0))) && (result[++i0] = sub),
+				cursor = mask.ro,
+				(v = typeof (v = mask.captor[Terms.callback]) === 'function' ? v(mask, masks, str, detail, this) : mask) === deletes ||
+					(Array.isArray(v) && v[splices] ? v.length && (i0 = result.push(...v) - 1) : (result[++i0] = v))
+			);
+			if (min(mask.ro, str.length) === str.length) break;
+		}
+		
+		cursor <= sl && (result[++i0] = str.substring(cursor));
+		
+		return result;
 		
 	}
 	
 }
 
-// このオブジェクトを継承する場合、メソッド ParseHelper.protoype.setGrammar を通じて設定を行うことを推奨する。
-// setGrammar は、構文記述子を優先順に列挙した配列を指定する。
+// このオブジェクトを継承する場合、メソッド ParseHelper.protoype.setPrecedence を通じて設定を行うことを推奨する。
+// setPrecedence は、構文記述子を優先順に列挙した配列を指定する。
 // 構文記述子には以下のプロパティを設定できる。
 // 	name
 // 		記述子によって作られた構文文字 Term を持つ自身のプロパティ名。プロパティは直接インスタンスに作成される。
@@ -729,7 +984,7 @@ export class Terms extends Array {
 // 			このプロパティが存在しない場合、bind の第二引数は未指定で実行される。
 // 			値が配列であればそれをそのまま、それ以外の場合は配列に入れて指定される。
 // 			引数に配列を指定したい場合は配列の中にその配列を入れて指定する。
-// 	super
+// 	unmasks
 // 		このプロパティが真を示す記述子は、それによって作られた Term が一致を示す文字列を構文ではなく値として使う。
 // 		これは通常、構文内で型の違う値を区別するために指定する。
 // 	esc
@@ -756,68 +1011,192 @@ export class Terms extends Array {
 // 	[ParseHelper.symbol.before]
 // 	[ParseHelper.symbol.main]
 // 	[ParseHelper.symbol.after]
-export class ParseHelper {
+export class ParseHelper extends Terms {
 	
-	static symbol = {
+	//static setTermTo(precedenceDescriptors, name, term) {
+	//	
+	//	const l = precedenceDescriptors.length;
+	//	let i, pd;
+	//	
+	//	i = -1;
+	//	while (++i < l)	if ((pd = precedenceDescriptors[i]).constructor === Array)
+	//								ParseHelper.setTermTo(pd, name, term);
+	//							else if (pd && typeof pd === 'object' && pd.name === name && (pd.term = term)) return;
+	//	
+	//}
+	static setSymbols(target) {
 		
-		before: Symbol(),
-		main: Symbol(),
-		after: Symbol(),
+		const	symbolNamesRaw = target?.[this.symbolNames],
+				symbolNames = symbolNamesRaw === 'string' ? [ symbolNamesRaw ] : symbolNamesRaw;
 		
-		deletes: Symbol(),
-		passthrough: Symbol(),
+		if (!Array.isArray(symbolNames)) return;
 		
-		hierarchy: Symbol()
+		const l = symbolNames.length,
+				ss = this.symbol,
+				s = target[ss] && typeof target[ss] === 'object' ? target[ss] : (target[ss] = {});
+		let i,k, sn;
+		
+		i = -1;
+		while (++i < l)
+			(sn = symbolNames[i]) && typeof sn === 'string' && typeof s[sn] !== 'symbol' && (s[sn] = Symbol(sn));
+		
+		// precedence は ParseHelper ではなく Terms のための設定記述子になったので、以下は不要に思われる。
+		//sn = ParseHelper.setPrecedenceSymbols(target[ParseHelper.symbol.precedenceDescriptors]);
+		//for (k in sn) s[k] = sn[k];
+		
+		return s;
+		
+	}
+	//static setPrecedenceSymbols(pd) {
+	//	
+	//	if (!Array.isArray(pd)) return {};
+	//	
+	//	const l = pd.length, s = {};
+	//	let i;
+	//	
+	//	i = -1;
+	//	while (++i < l) {
+	//		if (Array.isArray(pd[i])) {
+	//			s = { ...s, ...ParseHelper.setPrecedenceSymbols(pd[i]) };
+	//		} else if (pd[i] && typeof pd[i] === 'object' && typeof pd[i].name === 'symbol') {
+	//			s[Symbol.keyFor(pd[i].name)] = pd[i].name;
+	//		}
+	//	}
+	//	
+	//	return s;
+	//	
+	//}
+	static {
+		
+		const	symbols = [
+					
+					'before',
+					'main',
+					'after',
+					
+					'deletes',
+					'splices',
+					'passthrough',
+					
+					'precedenceDescriptors',
+					'esc',
+					'symbolNames',
+					'symbol',
+					'hierarchy'
+					
+				],
+				l = symbols.length;
+		let i;
+		
+		i = -1;
+		while (++i < l) this[symbols[i]] = Symbol(this.name + '.' + symbols[i]);
 		
 	};
 	
-	constructor() {
+	//constructor(precedenceRemapper, esc = this.constructor.esc) {
+	constructor(configuration, constructor = ParseHelper) {
 		
-		this.super = [];
+		Array.isArray(configuration) && (configuration = { precedence: configuration }),
+		(!configuration || configuration.constructor !== Object) && (configuration = {}),
+		
+		configuration.precedence ||= constructor[ParseHelper.precedenceDescriptors],
+		'esc' in configuration || (configuration.esc = constructor[ParseHelper.esc]),
+		
+		super(configuration);
+		
+		//this.super = [],
+		//this.map = new Map(),
+		
+		//this.setByPrecedence(this.constructor[ParseHelper.symbol.precedenceDescriptors], esc);
+		//this.remapPrecedenceTerm(precedenceRemapper, esc);
 		
 	}
 	
-	setGrammar(grammar, esc, terms = [], map = new Map()) {
-		
-		const l = (Array.isArray(grammar) ? grammar : [ grammar ]).length;
-		let i,ti,si, g, term, callback;
-		
-		i = ti = si = -1;
-		while (++i < l) {
-			
-			if (Array.isArray(g = grammar[i])) {
-				
-				this.setGrammar(g, esc, terms[++ti] = [], map);
-				
-			} else if (g && typeof g === 'object') {
-				
-				term = terms[++ti] = this[g.name] = g.term instanceof Term ? g.term : new Term(g.term, g?.esc ?? esc),
-				(callback = this.getGrammarCallback(g.callback)) && map.set(term, callback),
-				g.super && (this.super[++si] = term);
-				
-			}
-			
-		}
-		
-		return terms;
-		
-	}
-	getGrammarCallback(descriptor) {
-		
-		let handler, scope, args;
-		
-		typeof descriptor === 'function' ?
-			(handler = descriptor, scope = this) :
-		descriptor && typeof descriptor === 'object' &&
-			(
-				handler = descriptor.handler,
-				scope = 'scope' in descriptor ? descriptor.scope : this,
-				args = Array.isArray(descriptor.args) ? descriptor.args : 'args' in descriptor ? [ descriptor.args ] : []
-			);
-		
-		return handler && (args ? handler.bind(scope, ...args) : handler.bind(scope));
-		
-	}
+	//remapPrecedenceTerm(precedenceRemapper, esc = this.esc) {
+	//	
+	//	const	pd = this.constructor[ParseHelper.symbol.precedenceDescriptors],
+	//			map = this.map,
+	//			setTermTo = ParseHelper.setTermTo;
+	//	let k, t;
+	//	
+	//	this.esc = esc = esc instanceof Sequence ? esc : typeof esc === 'string' ? new Sequence(esc) : null;
+	//	
+	//	if (precedenceRemapper && typeof precedenceRemapper === 'object')
+	//		for (k in precedenceRemapper)
+	//			(t = this[k]) && map.delete(t),
+	//			setTermTo(pd, k, (t = precedenceRemapper[k]) instanceof Term ? t : new Term(t, esc));
+	//	
+	//	return this.setPrecedence(pd, this.esc, this[ParseHelper.symbol.precedence] = new Terms(), map);
+	//	
+	//}
+	//setPrecedence(precedenceDescriptors, esc, terms = [], map = new Map()) {
+	//	
+	//	const l = (Array.isArray(precedenceDescriptors) ? precedenceDescriptors : [ precedenceDescriptors ]).length;
+	//	let i,ti,si, pd, term, callback;
+	//	
+	//	i = ti = si = -1, esc = esc instanceof Sequence ? esc : typeof esc === 'string' ? new Sequence(esc) : null;
+	//	while (++i < l) {
+	//		
+	//		if (Array.isArray(pd = precedenceDescriptors[i])) {
+	//			
+	//			this.setPrecedence(pd, esc, terms[++ti] = [], map);
+	//			
+	//		} else if (pd && typeof pd === 'object') {
+	//			
+	//			term = terms[++ti] = this[pd.name] =
+	//				pd.term instanceof Term ? pd.term : new Term(pd.term, 'esc' in pd ? pd.esc : esc),
+	//			
+	//			(callback = this.getTermCallback(pd.callback)) && map.set(term, callback),
+	//			pd.super && (this.super[++si] = term);
+	//			
+	//		}
+	//		
+	//	}
+	//	
+	//	return terms;
+	//	
+	//}
+	//setPrecedence(precedenceDescriptors, esc, terms = [], map = new Map()) {
+	//	
+	//	const l = (Array.isArray(precedenceDescriptors) ? precedenceDescriptors : [ precedenceDescriptors ]).length;
+	//	let i,ti,si, pd, term, callback;
+	//	
+	//	i = ti = si = -1;
+	//	while (++i < l) {
+	//		
+	//		if (Array.isArray(pd = precedenceDescriptors[i])) {
+	//			
+	//			this.setPrecedence(pd, esc, terms[++ti] = [], map);
+	//			
+	//		} else if (pd && typeof pd === 'object') {
+	//			
+	//			term = terms[++ti] = this[pd.name] = pd.term instanceof Term ? pd.term : new Term(pd.term, pd?.esc ?? esc),
+	//			(callback = this.getTermCallback(pd.callback)) && map.set(term, callback),
+	//			pd.super && (this.super[++si] = term);
+	//			
+	//		}
+	//		
+	//	}
+	//	
+	//	return terms;
+	//	
+	//}
+	//getTermCallback(reflector) {
+	//	
+	//	let handler, scope, args;
+	//	
+	//	typeof reflector === 'function' ?
+	//		(handler = reflector, scope = this) :
+	//	reflector && typeof reflector === 'object' &&
+	//		(
+	//			handler = reflector.handler,
+	//			scope = 'scope' in reflector ? reflector.scope : this,
+	//			args = Array.isArray(reflector.args) ? reflector.args : 'args' in reflector ? [ reflector.args ] : []
+	//		);
+	//	
+	//	return handler && (args ? handler.bind(scope, ...args) : handler.bind(scope));
+	//	
+	//}
 	
 	safeReturn(v) {
 		const c = v?.constructor;
@@ -833,26 +1212,23 @@ export class ParseHelper {
 		return v;
 		
 	}
-	*getParser(str, detail = {}) {
+	*getParser(str, detail = {}, plot = this.plot(str) ?? []) {
 		
-		const	hierarchy = this[ParseHelper.symbol.hierarchy],
-				masks = hierarchy.getMasks(str).masks, { deletes, passthrough } = ParseHelper.symbol;
-		let i,l,i0, v;
+		const parsed = [], { before, main, after, deletes, splices, passthrough } = ParseHelper;
+		let i,l, v;
 		
-		if (Array.isArray(this.super)) {
-			
-			i = -1, l = this.super.length;
-			while (++i < l) (i0 = hierarchy.indexOf(this.super[i])) === -1 || masks.splice(i0, 1);
-			
-		}
-		
-		const plot = Term.plot(str, ...masks), parsed = [], { before, main, after } = ParseHelper.symbol;
+		//if (Array.isArray(this.super)) {
+		//	
+		//	i = -1, l = this.super.length;
+		//	while (++i < l) (i0 = precedence.indexOf(this.super[i])) === -1 || masks.splice(i0, 1);
+		//	
+		//}
 		
 		l = plot.length;
 		
 		if (typeof this[before] === 'function') {
 			
-			if ((v = this.safeReturn(this[before](plot, l, str, detail, passthrough, this), l = plot.length, v)) !== passthrough) return v;
+			if ((v = this.safeReturn(this[before](plot, l, str, detail, this), l = plot.length, v)) !== passthrough) return v;
 			
 			(v = yield v) && (plot = v);
 			
@@ -860,22 +1236,20 @@ export class ParseHelper {
 		
 		if (typeof this[main] === 'function') {
 			
-			const splice = [];
 			let pi;
 			
 			i = pi = -1, l = plot.length;
 			while (++i < l) {
 				
-				v = this[main](plot[i], parsed, plot, l, str, detail, splice, deletes, this);
+				v = this[main](plot[i], parsed, plot, l, str, detail, this);
 				
-				if (splice.length) {
+				if (Array.isArray(v) && v.hasOwnProperty(splices) && v.length) {
 					
-					pi = parsed.push(...splice) - 1,
-					splice.length = 0;
+					pi = parsed.push(...v) - 1;
 					
 				} else if (v === deletes) {
 					
-					plot.splice(i--,1), --l;
+					plot.splice(i--, 1), --l;
 					
 				} else {
 					
@@ -898,478 +1272,323 @@ export class ParseHelper {
 	
 }
 
-// todo: (深刻度順)
-// 	全体的にエラーハンドリングが欠如しすぎている。
-// 	✔️引数に undefined 的なものを指定できるようにする。
-// 		検証は杜撰。引数に undefined を指定したい場合は nai を指定する。
-// 		[0,5,nai] は、第三引数が Composer.increase の既定値の 1 で補われ [0,5,1] になるため、
-// 		戻り値は [ '0', '1', '2', '3', '4', '5' ] になる。
-// 		nai は日本語の「無い」に由来するが、これは null を意識した以上の意味はなく、より必然性の高い語句があればそれに代替すべき。
-// 		そもそも null !== undefined であるため不適切。
-// 	(...) の再帰をほぼ検証していないため動作確認。
-// 	✔️dom で外部 HTML を読み込み。（Same origin 限定）
-// 		最低限の実用性を持たせようとすると現状でも引数が足りない（特に iframe のサイズを指定できるようにすべき）が、
-// 		一方で一度に指定するには引数の数が多すぎるので、
-// 		なんらかの方法でまとめられる引数はまとめて指定できるようにしないと可読性が落ち、記述するためのコストも上がり続ける。
-// 	✔️すべての構文で括弧内接頭辞 / に対応。（詳細は :; ;; を参照）
-// 	特定の文字列が存在した場合、全体を文字列ではなく生の値で返す。
-// 	各構文にブラックリスト的なものを指定できるようにする。
-//
-// 構文に基づいて文字列を生成する。
-// 構文にエラーハンドリング等は一切実装しておらず、堅牢性はない。
-// エスケープは \\ で行なう。\\(=\) を文字列として使う場合は、\\\\ になる。
-// ' を使う構文があるため、解析の対象文字列は " で囲うことを推奨。
-//
-// 構文構造
-// 	"構文開始文字[[ラベル名](:||;)[フラグ];]([再帰URL||][[[引数], 引数], ...]||[[[再帰]|再帰]|...])構文終了文字"
-//
-// '...'
-// 	シングルクォーテーションで囲まれた値は常に文字列を示す。
-// 	文字列中では構文に使う文字を含め、クォーテーション(",')以外の任意の文字列を通常の JavaScript の文字列と同様 \\ なしで指定できる。
-// 	エスケープする際は " は \、' は \\ で行なう。
-// [...]
-// 	左から順に 開始値,終了値,増加値,字詰め文字,桁数(正の値の場合先頭方向、負の値の場合末尾方向へ字詰めする) を記す。
-// 	開始値、終了値には文字列も指定できる。その場合、増加値は開始値のコードポイントに加算される。
-// 	例えば ['a','c',1] は 'a' 'b' 'c' を生成する。
-// 	終了値が開始値より小さい場合、値は負の方向へ進行する。
-// 	増加値は負の値を受け付けるが、値は常に自然数に変換される。
-// 	一方で、負の値を指定した場合、仮に出力の末尾が増加値を超えた場合、通常だとその値は出力に含まれないが、末尾を常に終了値で補完する。
-// 	この構文は Composer.increase の短絡表現のため、より詳細な説明が必要な場合は同メソッドのコメントを参照できる。
-// <...>
-// 	第一引数の文字列をセレクターとして、指定されたドキュメント（既定ではスクリプトの実行元）内でそれに一致するすべての要素を選択し、
-// 	それらから第二引数に指定された属性名ないしプロパティ名の値で文字列を生成する。第二引数を省略した場合、選択要素の textContent に置き換わる。
-// 	第二引数に指定した文字列の先頭に . を付けると、属性名ではなくプロパティ名として認識し、
-// 	'.dataset.dummy' のように、以後 .プロパティ名 を連結してネストするプロパティにアクセスできる。
-// 	第三引数に正規表現を示す文字列を指定すると、その取得した値からその正規表現に一致する部分を抽出して文字列を生成する。
-// 	この正規表現は指定段階では文字列であるため、メタ文字に含まれる \ は \\ としなければならない。
-//
-// 	第一引数の前に | を置いて、その左側に URL に相当する文字列を指定すると、その URL が示す HTML 文書内から要素の値を取得する。
-// 	URL には絶対、相対パスを指定できるが、絶対パスを指定しても同一オリジンポリシーによりリソースが取得できることはないと思われる。
-// 	相対パスを指定した場合、このスクリプトの実行パスを基点として、パスが示す同一サーバー内のリソースの取得を試みる。
-// 	外部リソースの取り扱いにまつわる様々な制約を回避するために、取得したリソースは実行パス上に追加される <iframe> でインラインで展開される。
-// 	これは、リソースが実行元とは異なる階層に存在していて、リソース内に相対パスが含まれる場合、リソースが正常に動作しないことを意味する。
-// 	この構文が取得するのは画像などのメディアではなくドキュメント構造上に存在する情報なので、リソースが静的な HTML であれば問題が表面化しないが、
-// 	外部リソースの JavaScript などで動的に情報を読み込むページの場合、求める情報を得ることはできないだろう。
-// 	このように、HTML や JavaScript に課せられた制約のため、提供される機能が実用に至るケースはそれほど多くないか、ほとんどないと思われる。
-// 	URL に指定した文字列は、Strings.prototype.get で再帰的に解析される。
-// 	これは例えば機械的に生成された規則的な URL 上のページの情報にアクセスする際に有用となるだろう。
-// 	URL を指定する時、URL が不特定多数である場合、第四引数に URL にアクセスする間隔をミリ秒で指定できる
-// 	例えば URL が 0.html, 1.html で、第四引数が 500 の場合、0.html を取得後、0.5 秒後に 1.html への要求を開始する。
-// 	自然数以外の値、例えば -1 を指定すると、すべての URL に同時平行してアクセスする。
-// 	これは URL の数によってはサーバーに損害を与えかねないので、ローカルサーバーに対してなどに対してでなければ決して推奨されない。
-// 	この値は、既定では 1000 ミリ秒に設定される。
-// 	第五引数はリクエストのタイムアウトを待つ時間で、ミリ秒で指定する。設定した時間内にリクエストが完了しなければ、リクエストは強制的に中断され、
-// 	その URL が示す情報は未指定として扱われる。既定では 30000 ミリ秒に設定される。
-// 	
-// (...)
-// 	括弧内のコンマで区切られた値で分岐させる。値間は | で区切る。
-// 	この中の値は、Strings.get を再帰して処理される。
-// 	そのため、文字列の指定は ' で囲わずに行なう必要がある。
-// 	そして再帰されるため、任意の構文を必要に応じて使用することができる。
-// 	再帰前にラベル付けした値も再帰先から参照できる。（ただし再帰先で同名のラベルを付けた場合、再帰前の同名ラベルはそのラベルの値で上書きされる）
-// 	なお、この構文そのものには (label:=;a|b) のようなラベル付けや挙動の指定はできない。
-// 	この構文で生成する値を再利用するなどしたい場合は (~label:;'a'~|b)*label* などとする
-// :;, ;;
-// 	[labeled:; ...] のように、各括弧内の行頭から :; ないし ;; までの間はラベルとして認識される。
-// 	ラベルを :; で閉じた場合、その括弧の値はその場で展開されると同時にラベル付けされて記録もされる。
-// 	ラベルを ;; で閉じた場合、その括弧の値はラベル付けされて後方参照が可能になるが、その場での展開はされない。
-// 	ラベル付けされた値を再利用するには、それより後方で下記構文 *...* を使う。
-// 	なお、実際には、すべての構文にラベルが暗黙に割り当てられる。
-// 	明示的にラベルを指定していない構文に対しては、ただの文字列も含め、全体の左から数えたその構文の位置が便宜的なラベルになる。
-// 	例えば "a(b|c)d*1**2*"の場合、生成される文字列は [ 'abdbd', 'abdcd', 'acdbd', 'acdcd' ] である。
-// 	この出力は、明示的にラベル付けした "a(1:;b|c)(2:;d)*1**2*" の出力と等価である。
-//
-// 	:; ;; いずれの場合も、<label:>=; ...> のように、二つの記号の間に特定の文字列(オプション)を指定して構文の挙動を変更することができる。
-// 	オプションは空白で区切り複数指定可能だが、現状はいずれのオプションも排他関係にある。
-// 	*実際に行なうかどうかはともかく、破壊的な改修を伴う変更の余地がある。例えば引数を受け付けるオプションを指定できれば柔軟性が向上する
-// 		>=
-// 			構文によって生成された文字列が前方までに生成された文字列より少ない場合、前方の数に達するまで生成された文字列を繰り返して補われる。
-// 			例えば "['a','c',1][:>=;'a','b',1]" は 'aa', 'bb', 'ca' を生成する。
-// 			一方、構文の生成文字列が前方までの生成文字列を超過する場合、構文の生成文字列は前方までのそれの数に切り詰められる。
-// 			['a','c',1][:>=;'a','d',1] は 'aa', 'bb', 'cc' を生成する。
-// 		<=
-// 			>= の逆を行なう。
-// 			"['a','c',1][:<=;'a','b',1]" は [ 'aa', 'bb' ] を生成する。
-// 			"['a','c',1][:<=;'a','d',1]" は [ 'aa', 'bb', 'cc', 'ad' ] を生成する。
-// *...*
-// 	ラベル名をアスタリスクで囲んだものは、そのラベルの値で代替される。
-// 	(...) などでネストした時も、ネスト先から上位のラベルを参照できるが、若干同一階層間で参照した時と挙動が異なる。
-// 	同一階層の時、参照する値は、参照元で生成した実際の値をそのまま再利用する。つまり生成処理は繰り返されない。
-// 	一方、異なる階層間で参照すると、生成後の値を参照するのではなく、生成前の記述子を参照し、それを実際の生成処理に用いる。
-// 	つまりまったく同じ値を作成する処理を繰り返す。それ以外にも違いがある可能性はゼロではないが今のところ未確認。
-// 	以下は廃止。代替は *:=;...*
-// 	この構文を使用する時、ラベル名の先頭に / を付けると、ラベル付けされた値の適用方法を切り替える。
-// 	/ なしの場合、値は それ以前に生成されたすべての文字列 * ラベル付けされた値が持つ文字列の数 分生成される。
-// 	/ を付けた場合、ラベル付けされた値は単純にそれまで生成された文字列に結合され、ラベル付けされた値の数 < それまでに生成された文字列の数 だった場合、
-// 	ラベル付けされた値は不足に達した時点でラベル付けされた値内を周回して不足分を補う。
-// 	以下は動作モードの違いによる出力の例。
-// 	labeled = [ 0, 1, 2 ], strings = [ 'a', 'b', 'c', 'd', 'e' ]
-// 	Strings.get("[labeled;;0,2,1]['a','e',1]*labeled*");
-// 		// [ 'a0', 'a1, 'a2', 'b0', 'b1', 'b2', 'c0', 'c1, 'c2', 'd0', 'd1, 'd2', 'e0', 'e1, 'e2' ]
-//		Strings.get("[labeled;;0,2,1]['a','e',1]*/labeled*");
-// 		// [ 'a0', 'b1, 'c2', 'd0', 'e1' ]
-// `...`
-// 	括弧中の文字列を JavaScript として実行し、return によって返された値を戻り値として使う。
-// 	引数 labeled に、ラベルを付けた値をプロパティに示す Object が与えられる。
-// 	仕様で補え切れない状況に対応するための応急処置的な使用を想定しており、可読性を著しく落とす。
-// 	この括弧中でのテンプレート文字列の使用は現状非対応。
-// {...}
-// 	値間を , で区切り、最初の値を実行主体、次の値(文字列)を(JavaScript APIの)メソッド名、以降をそのメソッドの引数として、指定のメソッドを実行する。
-// 	直接値を指定する場合、数値か文字列しか指定できないが、他の構文、例えば `...` と組み合わせることで間接的に任意の値を指定できる。
-// 	値にはラベルを変数的に指定でき、その際はラベルの文字列を * で囲む必要はない。
-// 	ただし、この場合、指定するラベルは JavaScript の識別子と同じ命名規則に従っていなければならない。
-// 	https://developer.mozilla.org/ja/docs/Glossary/Identifier
-// ^...^
-// 	直後の構文ないし文字列を指定に従って繰り返す。以下の引数を取る。
-// 	loopCount (optional)
-// 		任意の自然数で、| で区切られた右側の文字列を繰り返す回数を指定する。
-// 	separator (optional)
-// 		' で囲った任意の文字列で、| で区切られた右側の文字列を繰り返す時の区切り文字になる。
-// 	strings
-// 		繰り返す文字列を指定する。上記の引数とは | で区切る。指定された文字列は ParseHelper.prototype.get の第一引数として再帰して解析される。
-// 		重要な点として、この文字列は ' で囲う必要はない。' で囲うと構文を含んでいても単一の文字列として解釈される。
-// 		また、文字列に構文 (...) を使用する場合、同構文内の区切り文字 | は \ でエスケープしなければ認識されない。
-// 		文字列中にプレースホルダー $i $I $l が使える。$i は 0 から開始する現在のループ回数、$I は 1 から開始する同回数、$l は loopCount に置換される。
-// 		仮にこれらのプレースホルダーを文字列として使う場合は \\$i などとする。プレースホルダーは構文内外問わず任意に指定できる。
-// 	指定は "^2,','|a^" のように行なう。この出力は [ 'a,a' ] である。
-// 	指定次第で予期しない巨大な出力を生成する点に注意が必要。
-// 	（一方、リソース不足エラーにより思ったより巨大なデータを得られない点にも気付くかもしれない）
-// ~...~
-// 	この構文内の文字列を式として評価し、その結果を文字列にする。分岐などは行なわない。対応しているのは四則演算のみ。
-// 	^...^ でプレースホルダーを使って文字列を生成したり、(~label:;'a'~|b)*label* などとして分岐する文字列をラベル化するなどの使い方が考えられる。
-// 	便宜的な実装で構文記号含め変更の必要が強い。特に構文の優先順位の必然性など確認が不足している。
-//
-// エスケープも含め、上記の構文文字は任意の文字に変更しようと思えばできなくはないが、一切動作検証していないので強く推奨しない。
-
-// 使用例:
-// 	Strings.get("a`return '0'+1;;`[label:0,5,1,5,'_',2,'_']<'#id[id=\"sample\"]', 'textContent'>(a|b)*label*");
-export class Strings extends ParseHelper {
+export class Strings {
 	
-	static descriptor = {
-		
-		eval(inner, block, parsed, plot, plotLength, input, detail, splice, deletes, self) {
-			
-			return (new Function('detail', inner))(detail.v);
-			
-		},
-		echo(inner, block, parsed, plot, plotLength, input, detail, splice, deletes, self) {
-			
-			const	args = this.or.split(inner, ...this.frkArgHierarchy.getMasks(inner).masks),
-					hasOpts = args.length > 1,
-					arg = hasOpts ? args[1] : args[0],
-					opts = hasOpts ? this.getArgs(args[0], detail, this.argHierarchy) : null,
-					l = opts?.[0] ?? 1,
-					separator = opts?.[1],
-					l0 = l - 1;
-			let i,ai, v, arg0, parser;
-			
-			i = ai = -1;
-			while (++i < l) {
-				arg0 = this.el.replace(this.eI.replace(this.ei.replace(arg, i), i + 1), l),
-				(v = (parser = this.getParser(arg0, detail)).next()).done ?
-					(splice[++ai] = v.value) : (ai = splice.push(...parser.next().value) - 1),
-				separator && i < l0 && (splice[++ai] = separator);
-			}
-			
-		},
-		reflection(inner, block, parsed, plot, plotLength, input, detail, splice, deletes, self) {
-			
-			const args = this.getArgs(inner, detail, this.argHierarchy);
-			
-			return {
-				methods: [
-					{ value: args[0], name: args[1], args: args.slice(2) }
-				]
-			};
-			
-		},
-		consecutiveNumber(inner, block, parsed, plot, plotLength, input, detail, splice, deletes, self) {
-			
-			const	args = this.getArgs(inner, detail, this.argHierarchy),
-					v = { from: args[0], to: args[1], value: args[2] };
-			
-			args.length > 3 && (
-				v.methods = [
-					{
-						name: (args[3] = args?.[3] ?? 0) > 0 ? 'padStart' : 'padEnd',
-						args: [ Math.abs(args[3]), args?.[4] ?? undefined ]
-					}
-				]
-			);
-			
-			return v;
-			
-		},
-		fork(inner, block, parsed, plot, plotLength, input, detail, splice, deletes, self) {
-			
-			const	args = this.or.split(inner, ...this.frkArgHierarchy.getMasks(inner).masks),
-					l = args.length,
-					v = [],
-					addr = detail.addr;
-			let i,vi, i0,l0, arg;
-			
-			i = vi = -1;
-			while (++i < l) {
-				i0 = -1, delete detail.addr, l0 = (arg = this.get(args[i], detail))?.length ?? 0;
-				while (++i0 < l0) v[++vi] = arg[i0];
-			}
-			
-			detail.addr = addr;
-			
-			return v;
-			
-		},
-		recycle(inner, block, parsed, plot, plotLength, input, detail, splice, deletes, self) {
-			
-			const v = detail.addr.indexOf(inner);
-			
-			return v === -1 ? inner in detail.v ? detail.v[inner] : '' : v;
-			
-		},
-		selector(inner, block, parsed, plot, plotLength, input, detail, splice, deletes, self) {
-			
-			const	args = this.or.split(inner, ...this.frkArgHierarchy.getMasks(inner).masks),
-					addr = detail.addr,
-					urls = args.length > 1 && (delete detail.addr, this.get(args[0], detail)),
-					params = this.getArgs(args[+!!urls], (detail.addr ||= addr, detail), this.argHierarchy),
-					propertyName = params?.[1]?.split('.') ?? [ '', 'textContent' ];
-			
-			return {
-				urls,
-				selector: params?.[0],
-				propertyName: propertyName[0] || (propertyName.shift(), propertyName),
-				rxSrc: params?.[2],
-				interval: params?.[3] || 1000,
-				timeout: params?.[4] || 30000
-			};
-			
-		},
-		calc(inner, block, parsed, plot, plotLength, input, detail, splice, deletes, self) {
-			
-			return ''+this.getArgs(inner, detail, this.argHierarchy)[0];
-			
-		}
-	};
-	// 実際に使用される主な構文を優先順で列挙したリスト。
-	// 一切検証していないが、使用する構文の可否をこの値の変更だけで任意に行なえるかもしれない。
-	// 例えばセキュアであることが求められる場合、以下の this.evl を消すことで簡易に対応できる。
-	// str = string, re = recycle, evl = eval,
-	// fnc = function(reflection), dom = document object model, amp = amplifier, frk = fork, lbl = label,
-	// ech = echo = dup(old name) = duplicate
-	static sym = {
-		
-		str: Symbol(),
-		re: Symbol(),
-		evl: Symbol(),
-		fnc: Symbol(),
-		dom: Symbol(),
-		amp: Symbol(),
-		frk: Symbol(),
-		ech: Symbol(),
-		clc: Symbol(),
-		
-		backwards: Symbol(),
-		every: Symbol()
-		
-	};
-	static labeled = ':';
-	static stored = ';';
-	static flagged = ';';
-	static flag = {
-		backwards: '<=',
-		every: '>='
-	};
-	static hierarchy = [
-		{ name: Strings.sym.str, term: [ "'", "'" ], super: true },
-		{ name: Strings.sym.re, term: [ '*', '*' ], callback: Strings.descriptor.recycle },
-		{ name: Strings.sym.evl, term: [ '`', '`' ], callback: Strings.descriptor.eval },
-		[
-			{ name: Strings.sym.fnc, term: [ '{', '}' ], callback: Strings.descriptor.reflection },
-			{ name: Strings.sym.dom, term: [ '<', '>' ], callback: Strings.descriptor.selector },
-			{ name: Strings.sym.amp, term: [ '[', ']' ], callback: Strings.descriptor.consecutiveNumber },
-			{ name: Strings.sym.frk, term: [ '(', ')' ], callback: Strings.descriptor.fork },
-			{ name: Strings.sym.ech, term: [ '^', '^' ], callback: Strings.descriptor.echo },
-			{ name: Strings.sym.clc, term: [ '~', '~' ], callback: Strings.descriptor.calc },
-			//{ name: 'dup', term: [ '^', '^' ] }
-		]
-	];
+	static anonAssignKey = Symbol('Strings.anonAssignKey');
 	
-	constructor() {
+	constructor(sp, exp, desc) {
 		
-		super();
+		sp = this.sp = sp instanceof StringsParser ? sp : new StringsParser(sp);
 		
-		// esc = escape
-		const esc = this.esc = new Sequence('\\');
+		const	es = StringsExpression.symbol;
 		
-		this.setGrammar(Strings.hierarchy, esc, this[ParseHelper.symbol.hierarchy] = new Terms(), this.map = new Map()),
-		this.argHierarchy = new Terms(this[Strings.sym.str], this[Strings.sym.re], this[Strings.sym.evl]),
-		this.frkArgHierarchy = new Terms(...this.argHierarchy, this[Strings.sym.frk]),
+		this.exp = exp instanceof StringsExpression ?
+			exp : new StringsExpression({ replacer: { [es.str]: sp.termOf('str'), [es.evl]: sp.termOf('evl') } }),
 		
-		this.unlabels = [
-			this[Strings.sym.evl],
-			this[Strings.sym.frk]
-		];
+		this.desc = desc instanceof StringsDescriptor ? desc : new StringsDescriptor(),
 		
-		// prm = parameter
-		this.prm = new Term(
-			[
-				/^/g,
-				new RegExp(`(?:${Unit.escapeRegExpStr(Strings.stored)}|${Unit.escapeRegExpStr(Strings.labeled)})`, 'g'),
-				Unit.escapeRegExpStr(Strings.flagged)
-			],
-			esc
-		),
-		
-		// dot, cmm = comma, or, idt = identify for labeled value
-		this.dot = new Chr('.', undefined, esc),
-		this.cmm = new Chr(',', undefined, esc),
-		this.or = new Chr('|', undefined, esc),
-		// echo increment, echo length
-		this.ei = new Chr(/\$i/g, undefined, esc),
-		this.eI = new Chr(/\$I/g, undefined, esc),
-		this.el = new Chr(/\$l/g, undefined, esc),
-		
-		this.expression = new Expression({ str: this[Strings.sym.str], evl: this[Strings.sym.evl] }, esc);
+		this.assigned = {},
+		this.unlabels = [];
 		
 	}
 	
-	[ParseHelper.symbol.before](plot, plotLength, input, detail, passthrough, self) {
+	get(str, assigned = this.assigned) {
 		
-		detail.v ||= {}, detail.addr ||= [];
+		(assigned && typeof assigned === 'object') || (assigned = { [Strings.anonAssignKey]: assigned });
 		
-		return passthrough;
-		
-	}
-	
-	[ParseHelper.symbol.main](block, parsed, plot, plotLength, input, detail, splice, deletes, self) {
-		
-		let l;
-		
-		detail.v ||= {}, l = (detail.addr ||= []).length;
-		
-		if (typeof block === 'string') {
-			detail.addr[l] = ''+l;
-			return block;
-		}
-		
-		const	{ label, stores, every, backwards, inner } =
-					this.parse(block.inners[0], this.unlabels.indexOf(block.captor) !== -1);
-		let i,i0,l0, args, v,vi, arg;
-		
-		detail.addr[l] = label || ''+l;
-		v = this.map.get(block.captor)?.(inner, ...arguments) ?? inner,
-		label && (detail.v[label] = v),
-		every && typeof v === 'number' ? (v = -v) : v && typeof v === 'object' && (v[Strings.sym.every] = every),
-		backwards && v && typeof v === 'object' && (v[Strings.sym.backwards] = backwards);
-		
-		return stores ? { neglect: v } : v;
-		
-	}
-	
-	[ParseHelper.symbol.after](parsed, parsedLength, plot, plotLength, input, detail, self) {
-		
-		const composed = Composer.compose(parsed), cl = composed.length;
-		let i;
+		const parameters = this.sp.get(str, assigned), pl = parameters.length, esc = this.sp.esc;
+		let i,i0,l0, p, args;
 		
 		i = -1;
-		while (++i < cl) composed[i] = this.esc.replace(composed[i]);
+		while (++i < pl) {
+			
+			if (!(p = parameters[i]) || typeof p !== 'object') continue;
+			
+			if (Array.isArray(args = (p = parameters[i]).args) && (l0 = args.length)) {
+				
+				i0 = -1;
+				while (++i0 < l0) args[i0] = this.exp.get(args[i0], assigned);
+				
+			}
+			
+			p.v = this.desc.get(p, assigned);
+			
+		}
+		
+		return parameters;
+		
+		const composed = Composer.compose(parameters), cl = composed.length;
+		
+		i = -1;
+		while (++i < cl) composed[i] = esc.replace(composed[i]);
 		
 		return composed;
 		
 	}
 	
-	parse(inner, unlabels) {
+	register(descriptor, describe) {
 		
-		let sLocs;
-		const	eLocs = this[Strings.sym.evl].locate(inner, sLocs = this[Strings.sym.str].locate(inner).completed).completed,
-				param = !unlabels && this.prm.locate(inner, sLocs, eLocs).completed?.[0],
-				settings = param && param.splitted[3].split(' ');
-		
-		return {
-				label: param?.splitted?.[1],
-				stores: param?.splitted?.[2][0] === Strings.stored,
-				backwards: settings && settings.indexOf(Strings.flag.backwards) + 1,
-				every: settings && settings.indexOf(Strings.flag.every) + 1,
-				strLocs: param ? (sLocs = this[Strings.sym.str].locate(inner = inner.substring(param.ro)).completed) : sLocs,
-				evlLocs: param ? this[Strings.sym.evl].locate(inner, sLocs).completed : eLocs,
-				inner
-			};
-		
-	}
-	
-	getArgs(str, labeled, hierarchy, passthrough) {
-		
-		const	args = this.cmm.split(str, ...hierarchy.getMasks(str).masks), l = args.length,
-				pt = Array.isArray(passthrough) && passthrough.length;
-		let i;
-		
-		i = -1;
-		while (++i < l) args[i] = pt && passthrough.indexOf(i) !== -1 ? args[i] : this.expression.get(args[i], labeled);
-		
-		return args;
+		this.desc.register(...arguments);
 		
 	}
 	
 }
 
-export class Expression extends ParseHelper {
+export class StringsParser extends ParseHelper {
+	
+	static {
+		
+		this.assignedIndex = Symbol('StringsParser.assignedIndex'),
+		
+		// esc = escape
+		this[ParseHelper.esc] = '\\',
+		
+		// str = string, nst = nest, ref = reference, blk = block
+		this[ParseHelper.symbolNames] = [
+			're', 'evl', 'fnc', 'dom', 'amp', 'frk', 'ech', 'clc',
+			'backwards', 'every'
+		],
+		
+		this.syx = {
+			l: '[',
+			r: ']',
+			assign: '=',
+			suppressor: ';',
+			separator: ':',
+			comma: new Chr(/[\s\t]*,[\s\t]*/g)
+		};
+		
+		const	s = ParseHelper.setSymbols(this),
+				{ l, r, assign, suppressor, separator } = this.syx,
+				assignment = this.syx.assignment = new RegExp(`[${Unit.escapeRegExpPattern(suppressor + separator)}]`, 'g');
+		
+		this[ParseHelper.precedenceDescriptors] = [
+			{ name: 'str', term: [ "'", "'" ], unmasks: true },
+			{ name: 'nst', term: [ '<', '>' ], callback: StringsParser.nest },
+			{ name: 'ref', term: [ '*', '*' ], callback: StringsParser.reference },
+			//{
+			//	name: s._syx,
+			//	term: [ '[', '=', ';', ':', ']' ],
+			//	callback: Strings.parse
+			//},
+			//{
+			//	name: s.syx,
+			//	term: [ '[', /(?:=\s*?(?<assign>[a-zA-Z_$][\w$]*?))?/g, /(?:(?:;|\:)\s*?(?<option>.*?))?/g, ':', ']' ],
+			//	callback: Strings.parse
+			//},
+			// sya = syntax assign
+			{ name: 'sya', term: [ l, assignment, r ], callback: StringsParser.parse },
+			{ name: 'syx', term: [ l, assignment, separator, r ], callback: StringsParser.parse },
+			//{
+			//	name: s._syx,
+			//	term: [ '[', /(?:=\s*?(?<assign>[a-zA-Z_$][\w$]*?))?\s*?(?:(?:;|\:)\s*?(?<option>.*?))?\s*?:/g, ']' ],
+			//	callback: Strings.parse
+			//},
+		];
+		
+	}
+	static nest(mask, masks, input, detail, self) {
+	}
+	static reference(mask, masks, input, detail, self) {
+	}
+	static parse(mask, masks, input, detail, self) {
+		
+		const	{ assign, suppressor } = StringsParser.syx,
+				splitted = mask.splitted,
+				header = splitted[1].split(assign),
+				descriptor = header[0]?.trim?.(),
+				label = header?.[1]?.trim?.(),
+				suppresses = suppressor instanceof RegExp ? suppressor.test(splitted[2][0]) : splitted[2][0] === suppressor;
+		let i,l, option, args, descriptor;
+		
+		switch (mask.captor) {
+			
+			case this.termOf('sya'):
+			args = splitted[3];
+			break;
+			
+			case this.termOf('syx'):
+			option = splitted[3].trim(), args = splitted[5];
+			break;
+			
+		}
+		
+		args &&= this.argMask.split(args.trim(), StringsParser.syx.comma),
+		
+		descriptor = { descriptor, label, option, args };
+		//
+		//const	parameter = { descriptor, label, suppresses, option, args };
+		//
+		//parameter.v = this.desc.get(parameter, this.assigned, arguments);
+		//
+		//return parameter;
+		
+		return suppresses ? { suppressed: descriptor } : descriptor;
+		
+	}
+	
+	constructor(configuration) {
+		
+		//super(precedenceRemapper, Strings.esc);
+		super(configuration, StringsParser);
+		
+		this.argMask = new Terms(this.termOf('str'), this.termOf('nst'), this.termOf('sya'), this.termOf('syx'));
+		
+		//const es = Expression.symbol;
+		//
+		//this.exp = new Expression({ replacer: { [es.str]: this.termOf('str'), [es.evl]: this.termOf('evl') } }),
+		//
+		//this.argMask = new Terms(this.termOf('str'), this.termOf('nst'), this.termOf('sya'), this.termOf('syx'));
+		//
+		//this.desc = new StringsDescriptor(),
+		//
+		//this.assigned = {},
+		//this.unlabels = [];
+		
+	}
+	
+	[ParseHelper.before](plot, plotLength, input, detail, self) {
+		
+		(detail.hasOwnProperty(StringsParser.assignedIndex) && Array.isArray(detail[StringsParser.assignedIndex])) ||
+			(detail[StringsParser.assignedIndex] = []);
+		
+		return ParseHelper.passthrough;
+		
+	}
+	//[ParseHelper.before](plot, plotLength, input, detail, self) {
+	//	
+	//	detail.v ||= {}, detail.addr ||= [];
+	//	
+	//	return ParseHelper.passthrough;
+	//	
+	//}
+	[ParseHelper.main](block, parsed, plot, plotLength, input, detail, self) {
+		
+		const index = detail[StringsParser.assignedIndex], l = index.length, k = block?.label;
+		
+		return k && (detail[k] = block), detail[index[l] = Symbol()] = block;
+		
+	}
+	//[ParseHelper.main](block, parsed, plot, plotLength, input, detail, self) {
+	//	
+	//	const addr = detail[ParseHelper.assignedIndex], l = addr.length;
+	//	//coco
+	//	addr[l] = Symbol(),
+	//	block && typeof block === 'object' && block.label && (detail[l] = block.label);
+	//	
+	//	return block;
+	//	if (typeof block === 'string') return block;
+	//	hi(block);
+	//	return block.captor?.[Terms.callback]?.(block, { block, parsed, plot, plotLength, input, detail, self });
+	//	
+	//	const callback = this[ParseHelper.mask].callback(block.captor);
+	//	
+	//	return Array.isArray(callback) ?
+	//		Reflect.apply(callback[0], callback[1], [ ...callback[2], block, { block, parsed, plot, plotLength, input, detl, self } ]) : block.$;
+	//	
+	//	const	{ label, stores, every, backwards, inner } =
+	//				this.parse(block.inners[0], this.unlabels.indexOf(block.captor) !== -1);
+	//	let i,i0,l0, args, v,vi, arg;
+	//	
+	//	label && (detail.addr[l] = label),
+	//	
+	//	v = this.map.get(block.captor)?.(inner, ...arguments) ?? inner,
+	//	label && (detail.v[label] = v),
+	//	
+	//	every && typeof v === 'number' ? (v = -v) : v && typeof v === 'object' && (v[Strings.sym.every] = every),
+	//	backwards && v && typeof v === 'object' && (v[Strings.sym.backwards] = backwards);
+	//	
+	//	return stores ? { neglect: v } : v;
+	//	
+	//}
+	
+	//register(descriptor, describe) {
+	//	
+	//	this?.desc?.register(...arguments);
+	//	
+	//}
+	
+	//書き換え中でコメントにしているだけで、必須の処理で消してはいけない。
+	//[ParseHelper.symbol.after](parsed, parsedLength, plot, plotLength, input, detail, self) {
+	//	
+	//	const composed = Composer.compose(parsed), cl = composed.length;
+	//	let i;
+	//	
+	//	i = -1;
+	//	while (++i < cl) composed[i] = this.esc.replace(composed[i]);
+	//	
+	//	return composed;
+	//	
+	//}
+}
+
+export class StringsExpression extends ParseHelper {
 	
 	static descriptor = {
 		
-		call(inner, block, parsed, plot, plotLength, input, detail, splice, deletes, self) {
+		call(mask, masks, input, detail, self) {
 			
 			// コメントの行は変更前の処理で、ネストする計算でエラーが起きていたが、
 			// ここに手を加えた覚えはないものの、戻り値の [0] を外すと動作するようになっている。またおかしくなった時はここを確認。
-			// 実際は手を加えた(恐らく Expression.prototype.after の戻り値)が、ここが変更箇所のいくつかの呼び出し元のひとつであるため、
+			// 実際は手を加えた(恐らく StringsExpression.prototype.after の戻り値)が、ここが変更箇所のいくつかの呼び出し元のひとつであるため、
 			// 変更時に影響の確認を怠っていたものと思われる。
 			//return this.get(inner, detail)[0];
 			return this.get(inner, detail);
 			
 		},
-		number(inner, block, parsed, plot, plotLength, input, detail, splice, deletes, self) {
-			return +block.$;
+		number(mask, masks, input, detail, self) {
+			return +mask.$;
 		},
 		
-		string(inner, block, parsed, plot, plotLength, input, detail, splice, deletes, self) {
-			return inner;
+		string(mask, masks, input, detail, self) {
+			return mask.$;
 		},
 		
-		eval(inner, block, parsed, plot, plotLength, input, detail, splice, deletes, self) {
-			return (new Function('labeled', inner))(detail);
+		eval(mask, masks, input, detail, self) {
+			return (new Function('labeled', mask.$))(detail);
 		},
 		
-		identify(inner, block, parsed, plot, plotLength, input, detail, splice, deletes, self) {
-			return detail && typeof detail === 'object' ? detail?.[inner] ?? undefined : undefined;
+		identify(mask, masks, input, detail, self) {
+			return detail && typeof detail === 'object' ? detail?.[mask.$] ?? undefined : undefined;
 		},
 		
-		ops(inner, block, parsed, plot, plotLength, input, detail, splice, deletes, self) {
-			return this.opsSymbol[block.$];
+		ops(mask, masks, input, detail, self) {
+			
+			const op = mask.$, precedence = StringsExpression.opsPrecedence, l = precedence.length;
+			let i;
+			
+			i = -1;
+			while (++i < l && precedence[i].kw.indexOf(op) === -1);
+			
+			if (i === l) throw new SyntaxError(`There are no operator such "${op}".`);
+			
+			return precedence[i].sym;
 		}
 		
 	};
-	static setTermTo(hierarchyDescriptors, name, term) {
-		
-		const l = hierarchyDescriptors.length;
-		let i, hd;
-		
-		i = -1;
-		while (++i < l) {
-			
-			if ((hd = hierarchyDescriptors[i]).constructor === Array) {
-				
-				Expression.setTermTo(hd, name, term);
-				
-			} else if (hd && typeof hd === 'object' && hd.name === name) {
-				
-				hd.term = term;
-				return;
-				
-			}
-			
-		}
-		
-	}
-	static add(v, left, right, idx, ldx, rdx, parsed, parsedLength, plot, plotLength, input, detail, splice, self) {
+	//static setTermTo(hierarchyDescriptors, name, term) {
+	//	
+	//	const l = hierarchyDescriptors.length;
+	//	let i, hd;
+	//	
+	//	i = -1;
+	//	while (++i < l) {
+	//		
+	//		if ((hd = hierarchyDescriptors[i]).constructor === Array) {
+	//			
+	//			StringsExpression.setTermTo(hd, name, term);
+	//			
+	//		} else if (hd && typeof hd === 'object' && hd.name === name) {
+	//			
+	//			hd.term = term;
+	//			return;
+	//			
+	//		}
+	//		
+	//	}
+	//	
+	//}
+	static add(v, left, right, idx, ldx, rdx, parsed, parsedLength, plot, plotLength, input, detail, self) {
 		
 		return [
 			idx - (idx - ldx),
@@ -1378,7 +1597,7 @@ export class Expression extends ParseHelper {
 		];
 		
 	}
-	static sub(v, left, right, idx, ldx, rdx, parsed, parsedLength, plot, plotLength, input, detail, splice, self) {
+	static sub(v, left, right, idx, ldx, rdx, parsed, parsedLength, plot, plotLength, input, detail, self) {
 		
 		return [
 			idx - (idx - ldx),
@@ -1387,7 +1606,7 @@ export class Expression extends ParseHelper {
 		];
 		
 	}
-	static div(v, left, right, idx, ldx, rdx, parsed, parsedLength, plot, plotLength, input, detail, splice, self) {
+	static div(v, left, right, idx, ldx, rdx, parsed, parsedLength, plot, plotLength, input, detail, self) {
 		
 		return [
 			idx - (idx - ldx),
@@ -1396,7 +1615,7 @@ export class Expression extends ParseHelper {
 		];
 		
 	}
-	static mul(v, left, right, idx, ldx, rdx, parsed, parsedLength, plot, plotLength, input, detail, splice, self) {
+	static mul(v, left, right, idx, ldx, rdx, parsed, parsedLength, plot, plotLength, input, detail, self) {
 		
 		return [
 			idx - (idx - ldx),
@@ -1405,83 +1624,109 @@ export class Expression extends ParseHelper {
 		];
 		
 	}
-	static nai(v, left, right, idx, ldx, rdx, parsed, parsedLength, plot, plotLength, input, detail, splice, self) {
+	static nai(v, left, right, idx, ldx, rdx, parsed, parsedLength, plot, plotLength, input, detail, self) {
 		
 		return [ idx, 1, undefined ];
 		
 	}
 	
-	constructor(term, esc) {
+	static {
 		
-		super(),
+		this.opsSymbolNames = [ 'nai', 'div', 'mul', 'sub', 'add' ],
+		this[ParseHelper.symbolNames] = [
+			'str', 'cll', 'evl', 'num', 'idt', 'ops', ...this.opsSymbolNames
+		];
 		
-		this.opsSymbol = {
-			'+': Symbol(),
-			'-': Symbol(),
-			'/': Symbol(),
-			'*': Symbol(),
-			'nai': Symbol()
-		},
-		this.opsIndex = {
-			[ this.opsSymbol['+'] ]: Expression.add,
-			[ this.opsSymbol['-'] ]: Expression.sub,
-			[ this.opsSymbol['/'] ]: Expression.div,
-			[ this.opsSymbol['*'] ]: Expression.mul,
-			[ this.opsSymbol['nai'] ]: Expression.nai
-		},
-		this.precedence = [
-			this.opsSymbol['nai'],
-			this.opsSymbol['/'],
-			this.opsSymbol['*'],
-			this.opsSymbol['-'],
-			this.opsSymbol['+']
-		],
-		
-		this.hierarchyDescriptors = [
-			{ name: 'str', term: [ "'", "'" ], callback: Expression.descriptor.string },
-			{ name: 'cll', term: [ '(', ')' ], callback: Expression.descriptor.call },
-			{ name: 'evl', term: [ '`', '`' ], callback: Expression.descriptor.eval },
-			{ name: 'num', term: [ /\d+(?:\.\d+)?/g ], callback: Expression.descriptor.number },
-			{ name: 'idt', term: [ /[$A-Za-z_\u0080-\uFFFF][$\w\u0080-\uFFFF]*/g ], callback: Expression.descriptor.identify },
-			{	name: 'ops',
-				term: [
-					new RegExp(`(?:${Object.keys(this.opsSymbol).map(v => Unit.escapeRegExpStr(v)).join('|')})`, 'g')
+		const	s = ParseHelper.setSymbols(this),
+				opsPrecedence = this.opsPrecedence = [
+					{ sym: s.nai, callback: StringsExpression.nai, kw: [ 'nai' ] },
+					{ sym: s.div, callback: StringsExpression.div, kw: [ '/' ] },
+					{ sym: s.mul, callback: StringsExpression.mul, kw: [ '*' ] },
+					{ sym: s.sub, callback: StringsExpression.sub, kw: [ '-' ] },
+					{ sym: s.add, callback: StringsExpression.add, kw: [ '+' ] }
 				],
-				callback: Expression.descriptor.ops
-			}
-		],
+				l = opsPrecedence.length;
+		let i,i0,l0,oi,kw, ops;
 		
-		this.map = new Map(),
+		i = oi = -1, ops = [];
+		while (++i < l) {
+			i0 = -1, l0 = (kw = Array.isArray(kw = opsPrecedence[i].kw) ? [ ...kw ] : [ kw ]).length;
+			while (++i0 < l0) kw[i0] = Unit.escapeRegExpPattern(kw[i0]);
+			l0 && (ops[++oi] = kw.join('|'));
+		}
 		
-		this.setTerm(term, this.esc = esc instanceof Sequence ? esc : new Sequence('\\'));
-		
-	}
-	
-	setTerm(term, esc = this.esc) {
-		
-		const hd = this.hierarchyDescriptors, map = this.map, setTermTo = Expression.setTermTo;
-		let k, t,t0;
-		
-		for (k in term)	(t = term[k]) instanceof Term || (t = new Term(t, esc)),
-								(t0 = this[k]) && map.delete(t0),
-								setTermTo(hd, k, t);
-		
-		return this.setGrammar(hd, this.esc, this[ParseHelper.symbol.hierarchy] = new Terms(), map);
-		
-	}
-	[ParseHelper.symbol.main](block, parsed, plot, plotLength, input, detail, splice, deletes, self) {
-		
-		if (typeof block === 'string') return deletes;
-		
-		const inner = block.inners[0] || block.$;
-		
-		return this.map.get(block.captor)?.(inner, ...arguments) ?? deletes;
+		this[ParseHelper.precedenceDescriptors] = [
+			{ name: s.str, term: [ "'", "'" ], callback: StringsExpression.descriptor.string },
+			{ name: s.cll, term: [ '(', ')' ], callback: StringsExpression.descriptor.call },
+			{ name: s.evl, term: [ '`', '`' ], callback: StringsExpression.descriptor.eval },
+			{ name: s.num, term: [ /\d+(?:\.\d+)?/g ], callback: StringsExpression.descriptor.number },
+			{ name: s.idt, term: [ /[$A-Za-z_\u0080-\uFFFF][$\w\u0080-\uFFFF]*/g ], callback: StringsExpression.descriptor.identify },
+			{ name: s.ops, term: [ new RegExp('(?:' + ops.join('|') + ')', 'g') ], callback: StringsExpression.descriptor.ops }
+		];
 		
 	}
 	
-	[ParseHelper.symbol.after](parsed, parsedLength, plot, plotLength, input, detail, self) {
+	constructor(configuration) {
 		
-		const prcdc = this.precedence, l = prcdc.length, splice = Array.prototype.splice;
+		super(configuration, StringsExpression);
+		
+		//const s = StringsExpression[ParseHelper.symbol];
+		
+		//this.opsSymbol = {
+		//	'+': Symbol(),
+		//	'-': Symbol(),
+		//	'/': Symbol(),
+		//	'*': Symbol(),
+		//	'nai': Symbol()
+		//},
+		//this.opsIndex = {
+		//	[ s['+'] ]: StringsExpression.add,
+		//	[ s['-'] ]: StringsExpression.sub,
+		//	[ s['/'] ]: StringsExpression.div,
+		//	[ s['*'] ]: StringsExpression.mul,
+		//	[ s['nai'] ]: StringsExpression.nai
+		//},
+		//this.precedence = [
+		//	s['nai'],
+		//	s['/'],
+		//	s['*'],
+		//	s['-'],
+		//	s['+']
+		//];
+		
+		//this.map = new Map(),
+		//
+		//this.remapPrecedenceTerm(term, this.esc = esc instanceof Sequence ? esc : new Sequence('\\'));
+		
+	}
+	
+	//remapPrecedenceTerm(term, esc = this.esc) {
+	//	
+	//	const hd = this.hierarchyDescriptors, map = this.map, setTermTo = StringsExpression.setTermTo;
+	//	let k, t,t0;
+	//	
+	//	for (k in term)	(t = term[k]) instanceof Term || (t = new Term(t, esc)),
+	//							(t0 = this[k]) && map.delete(t0),
+	//							setTermTo(hd, k, t);
+	//	
+	//	return this.setPrecedence(hd, this.esc, this[ParseHelper.symbol.hierarchy] = new Terms(), map);
+	//	
+	//}
+	
+	//[ParseHelper.main](block, parsed, plot, plotLength, input, detail, self) {
+	//	
+	//	if (typeof block === 'string') return ParseHelper.deletes;
+	//	//coco
+	//	
+	//	const inner = block.inners[0] || block.$;
+	//	
+	//	return block.captor?.callback?.(inner, ...arguments) ?? ParseHelper.deletes;
+	//	
+	//}
+	
+	[ParseHelper.after](parsed, parsedLength, plot, plotLength, input, detail, self) {
+		
+		const prcdc = StringsExpression.opsPrecedence, l = prcdc.length, splice = Array.prototype.splice;
 		let i,i0,li,ri, op,p,v, lp, spliceArgsLength;
 		
 		i = -1, lp = parsedLength - 1;
@@ -1490,9 +1735,9 @@ export class Expression extends ParseHelper {
 			i0 = -1, op = prcdc[i];
 			while (++i0 < parsedLength) {
 				
-				(p = parsed[i0]) === op && (
+				(p = parsed[i0]) === op.sym && (
 					
-					v = this.opsIndex[p]?.(
+					v = op.callback?.(
 							p,
 							(li = i0 > 0 ? i0 - 1 : null) === null ? li : parsed[li],
 							(ri = i0 === lp ? null : i0 + 1) === null? ri : parsed[ri],
@@ -1504,7 +1749,7 @@ export class Expression extends ParseHelper {
 							i0 = (v[0] + (spliceArgsLength = v.slice(2).length)) - 1,
 							lp = (parsedLength -= v[1] - spliceArgsLength) - 1
 						)
-				)
+				);
 				
 			}
 			
@@ -1516,10 +1761,450 @@ export class Expression extends ParseHelper {
 	
 }
 
+export class StringsDescriptor {
+	
+	static {
+		
+		this.deletes = Symbol('StringsDescriptor.deletes'),
+		this.reflects = Symbol('StringsDescriptor.reflects');
+		
+	}
+	
+	constructor() {
+		
+		this.descriptor = {},
+		
+		this.register(...arguments);
+		
+	}
+	
+	get(parameter, assigned, property) {
+		
+		const	descriptor = this.descriptor[parameter.descriptor];
+		let v;
+		
+		if (Array.isArray(descriptor) && descriptor[StringsDescriptor.reflects]) {
+			
+			const l = descriptor.length, args = [];
+			let i;
+			
+			i = -1;
+			while (++i < l) args[i] = parameter.args[i];
+			
+			v = Reflect.apply(descriptor[0], descriptor[1], [ ...args, ...descriptor[2] ]);
+			
+		} else v = descriptor;
+		
+		parameter.label && assigned && typeof assigned === 'object' && (assigned[parameter.label] = v);
+		
+		return v;
+		
+	}
+	
+	// 第二引数に指定されたコールバック関数 describe を、
+	// 第一引数 descriptor の型によって異なる方法でインスタンスに関連付ける。
+	// descriptor が文字列の時は、その名前をプロパティ名にする。
+	// 配列の時は、その要素をプロパティ名とする。
+	// Object の時は、describe は用いられず、descriptor のキーと値のペアを、それぞれ descriptor、describe とする。
+	// describe およびそれと同等のプロパティの値には、関数か配列を指定する。
+	// 配列の場合、その値は Reflect.apply の引数に準じた要素を列挙する必要がある。
+	// ただし、第三引数部分は、配列ではなく、与えたい引数を任意の数だけ配列の二番目以降に列挙する。
+	// 第三引数 asValue に真を示す値を指定すると、describe に、null などを含む任意の値を指定できる。
+	// この場合、通常はコールバック関数の戻り値を通じて値を取得する場面で、その値が固定値として与えられる。
+	// describe にシンボル StringsDescriptor.deletes を指定すると、descriptor に指定したプロパティを削除する。
+	register(descriptor, describe, asValue) {
+		
+		if (!descriptor) return;
+		
+		switch (typeof descriptor) {
+			
+			case 'string':
+			this.registerCallback(descriptor, describe, asValue);
+			break;
+			
+			case 'object':
+			if (Array.isArray(descriptor)) {
+				
+				const l = descriptor.length;
+				let i;
+				
+				i = -1;
+				while (++i < l) this.registerCallback(descriptor[i], describe, asValue);
+				
+			} else if (descriptor) {
+				
+				let k;
+				for (k in descriptor) this.registerCallback(k, descriptor[k], asValue);
+				
+			}
+			break;
+			
+		}
+		
+	}
+	registerCallback(name, callback, asValue) {
+		
+		if (callback === StringsDescriptor.deletes) {
+			delete this.descriptor[name];
+			return;
+		}
+		
+		if (asValue) {
+			this.descriptor[name] = callback;
+			return;
+		}
+		
+		typeof callback === 'function' && (callback = [ callback, undefined ]);
+		
+		Array.isArray(callback) && typeof callback[0] === 'function' &&
+			(callback[2] = callback.slice(2), (this.descriptor[name] = callback)[StringsDescriptor.reflects] = true);
+		
+	}
+	
+}
+
 const strings = new Strings();
 export default strings.get.bind(strings);
 
+class Counter {
+	
+	static describe(from, to, value, pad, separator, parameter, assigned) {
+		
+		// 以下の this は、Composer で実行する時に、 Composer.exec in this で真を示す時に this[Composer.exec] に置き換えられる。
+		// 上の記述は謎だが、Composer.$ は、実行時に、生成する文字列を列挙する Array に置換される。
+		const reflections = [ [ this.count, Composer.$, [ from, to, value ] ] ];
+		
+		Number.isNaN(typeof (pad = parseInt(pad))) || !pad ||
+			(reflections[1] = [ String.prototype[pad > 0 ? 'padStart' : 'padEnd'], Composer.$, [ Math.abs(pad), separator ] ]);
+		
+		return reflections;
+		
+	}
+	static count(from = 0, to = 1, value = 1) {
+		
+		if (!value) return (this[this.length] = from);
+		
+		const	isNum = typeof from === 'number' && typeof to === 'number', round = value < 0;
+		let i, vl, v;
+		
+		from = isNum ?	(Number.isNaN(v = from === undefined ? 0 : +from) ? (''+from).codePointAt() : v) :
+							(''+from).codePointAt()
+		to = isNum ?	(Number.isNaN(v = to === undefined ? 1 : +to) ? (''+to).codePointAt() : v) :
+							(''+to).codePointAt(),
+		vl = this.length - 1, value = Math.abs(value);
+		
+		if (from < to) {
+			
+			const l = to - from + value;
+			
+			i = -value;
+			while ((i += value) < l) {
+				if ((v = from + i) > to) {
+					if (!round) break;
+					v = to;
+				}
+				this[++vl] = isNum ? ''+v : String.fromCodePoint(v);
+			}
+			
+		} else {
+			
+			const l = to - from - value;
+			
+			i = value;
+			while ((i -= value) > l) {
+				if ((v = from + i) < to) {
+					if (!round) break;
+					v = to;
+				}
+				this[++vl] = isNum ? ''+v : String.fromCodePoint(v);
+			}
+			
+		}
+		
+		return this;
+		
+	}
+	
+}
+strings.register([ '+', 'cnt' ], [ Counter.describe, Counter ]);
+//export class Args extends ParseHelper {
+//	
+//	static {
+//		
+//		const ps = ParseHelper.symbol;
+//		
+//		this.esc = '\\',
+//		
+//		this[ps.symbolNames] = [ 'str', 'nst', 'sep' ],
+//		
+//		const	s = ParseHelper.setSymbols(this);
+//		
+//		this[ps.precedenceDescriptors] = [
+//			{ name: s.str, term: [ "'", "'" ], super: true },
+//			{ name: s.nst, term: [ '<', '>' ], super: true },
+//			{ name: s.sep, term: [ ',' ] },
+//		];
+//		
+//	}
+//	
+//	constructor(precedenceRemapper, esc) {
+//		
+//		super(precedenceRemapper, esc);
+//		
+//	}
+//	
+//	[ParseHelper.symbol.main]() {
+//		
+//		
+//		
+//	}
+//	
+//}
+
+//export class Syntax extends ParseHelper {
+//	
+//	static descriptor = {
+//		
+//		eval(inner, block, parsed, plot, plotLength, input, detail, self) {
+//			
+//			return (new Function('detail', inner))(detail.v);
+//			
+//		},
+//		echo(inner, block, parsed, plot, plotLength, input, detail, self) {
+//			
+//			const	args = this.or.split(inner, ...this.frkArgHierarchy.getMasks(inner).masks),
+//					hasOpts = args.length > 1,
+//					arg = hasOpts ? args[1] : args[0],
+//					opts = hasOpts ? this.getArgs(args[0], detail, this.argHierarchy) : null,
+//					l = opts?.[0] ?? 1,
+//					separator = opts?.[1],
+//					l0 = l - 1,
+//					values = [];
+//			let i,ai, v, arg0, parser;
+//			
+//			i = ai = -1, values[ParseHelper.splices] = true;
+//			while (++i < l) {
+//				arg0 = this.el.replace(this.eI.replace(this.ei.replace(arg, i), i + 1), l),
+//				(v = (parser = this.getParser(arg0, detail)).next()).done ?
+//					(values[++ai] = v.value) : (ai = values.push(...parser.next().value) - 1),
+//				separator && i < l0 && (values[++ai] = separator);
+//			}
+//			
+//			return values;
+//			
+//		},
+//		reflection(inner, block, parsed, plot, plotLength, input, detail, self) {
+//			
+//			const args = this.getArgs(inner, detail, this.argHierarchy);
+//			
+//			return {
+//				[Composer.reflections]: [
+//					{ value: args[0], name: args[1], args: args.slice(2) }
+//				]
+//			};
+//			
+//		},
+//		consecutiveNumber(inner, block, parsed, plot, plotLength, input, detail, self) {
+//			
+//			const	args = this.getArgs(inner, detail, this.argHierarchy),
+//					v = { from: args[0], to: args[1], value: args[2] };
+//			
+//			args.length > 3 && (
+//				v[Composer.reflections] = [
+//					{
+//						name: (args[3] = args?.[3] ?? 0) > 0 ? 'padStart' : 'padEnd',
+//						args: [ Math.abs(args[3]), args?.[4] ?? undefined ]
+//					}
+//				]
+//			);
+//			
+//			return v;
+//			
+//		},
+//		fork(inner, block, parsed, plot, plotLength, input, detail, self) {
+//			
+//			const	args = this.or.split(inner, ...this.frkArgHierarchy.getMasks(inner).masks),
+//					l = args.length,
+//					v = [],
+//					addr = detail.addr;
+//			let i,vi, i0,l0, arg;
+//			
+//			i = vi = -1;
+//			while (++i < l) {
+//				i0 = -1, delete detail.addr, l0 = (arg = this.get(args[i], detail))?.length ?? 0;
+//				while (++i0 < l0) v[++vi] = arg[i0];
+//			}
+//			
+//			detail.addr = addr;
+//			
+//			return v;
+//			
+//		},
+//		recycle(inner, block, parsed, plot, plotLength, input, detail, self) {
+//			
+//			return detail.v?.[typeof inner === 'number' ? detail.addr[inner] : inner] ?? '';
+//			
+//		},
+//		selector(inner, block, parsed, plot, plotLength, input, detail, self) {
+//			
+//			const	args = this.or.split(inner, ...this.frkArgHierarchy.getMasks(inner).masks),
+//					addr = detail.addr,
+//					urls = args.length > 1 && (delete detail.addr, this.get(args[0], detail)),
+//					params = this.getArgs(args[+!!urls], (detail.addr ||= addr, detail), this.argHierarchy),
+//					propertyName = params?.[1]?.split('.') ?? [ '', 'textContent' ];
+//			
+//			return {
+//				urls,
+//				selector: params?.[0],
+//				propertyName: propertyName[0] || (propertyName.shift(), propertyName),
+//				rxSrc: params?.[2],
+//				interval: params?.[3] || 1000,
+//				timeout: params?.[4] || 30000
+//			};
+//			
+//		},
+//		calc(inner, block, parsed, plot, plotLength, input, detail, self) {
+//			
+//			return ''+this.getArgs(inner, detail, this.argHierarchy)[0];
+//			
+//		}
+//	};
+//	
+//	static {
+//		
+//		const { symbolNames, symbol } = ParseHelper;
+//		
+//		// str = string, mtk = matryoshka(nest), ref = reference, blk = block
+//		this[symbolNames] = [
+//			'str', 're', 'evl', 'fnc', 'dom', 'amp', 'frk', 'ech', 'clc',
+//			'backwards', 'every'
+//		];
+//		
+//		const s = ParseHelper.setSymbols(this);
+//		
+//		this.precedence = [
+//			{ name: s.str, term: [ "'", "'" ], unmasks: true },
+//			{ name: s.mtk, term: [ '<', '>' ], unmasks: true },
+//			{ name: s.evl, term: [ '`', '`' ], unmasks: true },
+//			//変数名の正規表現 [a-zA-Z_$][\w$]
+//			{ name: s.arg, term: [ '[', /(?<descriptor>(?:))?\s*?(?<assign>=.*?)(?<option>(?:;|\:)(.*?));/g, /.*?/g, ']' ] },
+//			//[
+//			//	{ name: this.sym.fnc, term: [ '{', '}' ], callback: this.descriptor.reflection },
+//			//	{ name: this.sym.dom, term: [ '<', '>' ], callback: this.descriptor.selector },
+//			//	{ name: this.sym.amp, term: [ '[', ']' ], callback: this.descriptor.consecutiveNumber },
+//			//	{ name: this.sym.frk, term: [ '(', ')' ], callback: this.descriptor.fork },
+//			//	{ name: this.sym.ech, term: [ '^', '^' ], callback: this.descriptor.echo },
+//			//	{ name: this.sym.clc, term: [ '~', '~' ], callback: this.descriptor.calc },
+//			//]
+//		];
+//		
+//		this.labeled = ':';
+//		this.stored = ';';
+//		this.flagged = ';';
+//		this.flag = {
+//			backwards: '<=',
+//			every: '>='
+//		};
+//		// 実際に使用される主な構文を優先順で列挙したリスト。
+//		// 一切検証していないが、使用する構文の可否をこの値の変更だけで任意に行なえるかもしれない。
+//		// 例えばセキュアであることが求められる場合、以下の this.evl を消すことで簡易に対応できる。
+//		// str = string, re = recycle, evl = eval,
+//		// fnc = function(reflection), dom = document object model, amp = amplifier, frk = fork, lbl = label,
+//		// ech = echo = dup(old name) = clone
+//		//this.hierarchy = [
+//		//	{ name: this.sym.str, term: [ "'", "'" ], super: true },
+//		//	{ name: this.sym.re, term: [ '*', '*' ], callback: this.descriptor.recycle },
+//		//	{ name: this.sym.evl, term: [ '`', '`' ], callback: this.descriptor.eval },
+//		//	[
+//		//		{ name: this.sym.fnc, term: [ '{', '}' ], callback: this.descriptor.reflection },
+//		//		{ name: this.sym.dom, term: [ '<', '>' ], callback: this.descriptor.selector },
+//		//		{ name: this.sym.amp, term: [ '[', ']' ], callback: this.descriptor.consecutiveNumber },
+//		//		{ name: this.sym.frk, term: [ '(', ')' ], callback: this.descriptor.fork },
+//		//		{ name: this.sym.ech, term: [ '^', '^' ], callback: this.descriptor.echo },
+//		//		{ name: this.sym.clc, term: [ '~', '~' ], callback: this.descriptor.calc },
+//		//	]
+//		//];
+//	}
+//	constructor() {
+//		
+//		super();
+//		
+//		const esc = this.esc = new Sequence(Strings.esc);
+//		
+//		this.setPrecedence(Strings.precedence, esc, this[ParseHelper.precedence] = new Terms(), this.map = new Map()),
+//		this.argHierarchy = new Terms(this[Strings.sym.str], this[Strings.sym.re], this[Strings.sym.evl]),
+//		this.frkArgHierarchy = new Terms(...this.argHierarchy, this[Strings.sym.frk]),
+//		
+//		this.unlabels = [
+//			this[Strings.sym.evl],
+//			this[Strings.sym.frk]
+//		];
+//		
+//		// prm = parameter
+//		this.prm = new Term(
+//			[
+//				/^/g,
+//				new RegExp(`(?:${Unit.escapeRegExpPattern(Strings.stored)}|${Unit.escapeRegExpPattern(Strings.labeled)})`, 'g'),
+//				Unit.escapeRegExpPattern(Strings.flagged)
+//			],
+//			esc
+//		),
+//		
+//		// dot, cmm = comma, or, idt = identify for labeled value
+//		this.dot = new Chr('.', esc),
+//		this.cmm = new Chr(',', esc),
+//		this.or = new Chr('|', esc),
+//		// echo increment, echo length
+//		this.ei = new Chr(/\$i/g, esc),
+//		this.eI = new Chr(/\$I/g, esc),
+//		this.el = new Chr(/\$l/g, esc),
+//		
+//		this.expression = new StringsExpression({ [StringsExpression.symbol.str]: this[Strings.sym.str], [StringsExpression.symbol.evl]: this[Strings.sym.evl] }, esc);
+//		
+//	}
+//	
+//	parse(inner, unlabels) {
+//		
+//		let sLocs;
+//		const	eLocs = this[Strings.sym.evl].locate(inner, sLocs = this[Strings.sym.str].locate(inner).completed).completed,
+//				param = !unlabels && this.prm.locate(inner, sLocs, eLocs).completed?.[0],
+//				settings = param && param.splitted[3].split(' ');
+//		
+//		return {
+//				label: param?.splitted?.[1],
+//				stores: param?.splitted?.[2][0] === Strings.stored,
+//				backwards: settings && settings.indexOf(Strings.flag.backwards) + 1,
+//				every: settings && settings.indexOf(Strings.flag.every) + 1,
+//				strLocs: param ? (sLocs = this[Strings.sym.str].locate(inner = inner.substring(param.ro)).completed) : sLocs,
+//				evlLocs: param ? this[Strings.sym.evl].locate(inner, sLocs).completed : eLocs,
+//				inner
+//			};
+//		
+//	}
+//	
+//	getArgs(str, labeled, hierarchy, passthrough) {
+//		
+//		const	args = this.cmm.split(str, ...hierarchy.getMasks(str).masks), l = args.length,
+//				pt = Array.isArray(passthrough) && passthrough.length;
+//		let i;
+//		
+//		i = -1;
+//		while (++i < l) args[i] = pt && passthrough.indexOf(i) !== -1 ? args[i] : this.expression.get(args[i], labeled);
+//		
+//		return args;
+//		
+//	}
+//	
+//}
+
 export class Composer {
+	
+	static {
+		this.$ = Symbol('$'),
+		this.exec = Symbol('exec'),
+		this.reflections = Symbol('reflections'),
+		this.reflection = Symbol('reflection');
+	}
 	
 	// 第一引数 array の要素を第二引数 values に追加するだけの関数。
 	// 同様の処理は JavaScript のネイティブの機能を用いてよりエコノミーに実現できるが、
@@ -1852,7 +2537,7 @@ export class Composer {
 	// 数が満たない場合は生成順を 0 に巻き戻して結合を繰り返し、生成文字列がそれまでの文字列の数を超過する場合はそこで結合を終了する。
 	// 例えばそれまでに生成した文字列が 0,1,2 で、every を持つ記述子が 0,1 だった場合、合成された文字列は 00,11,20 になる。
 	// 同じように、every を持つ記述子が 0,1,2,3 を生成する場合、合成される文字列は 00,11,22 になる。
-	static *getComposer(parts) {
+	static *_getComposer(parts) {
 		
 		let i,i0,l0,pi,pl, p, nodes,propertyName, composed, neglects, source, resolver, every,backwards;
 		const	l = (Array.isArray(parts) ? parts : (parts = [ parts ])).length, URLs = [],
@@ -1904,7 +2589,7 @@ export class Composer {
 				} else if ('from' in p || 'to' in p || 'value' in p)
 					Composer.increase(p?.from ?? 0, p?.to ?? 1, p?.value ?? 1, values);
 				
-				Array.isArray(p.methods) && Composer.applyAll(p.methods, values);
+				Array.isArray(p[Composer.reflections]) && Composer.applyAll(p[Composer.reflections], values);
 				
 				break;
 				
@@ -1927,6 +2612,131 @@ export class Composer {
 				);
 			
 			values.length = 0, neglects = null;
+			
+		}
+		
+		pl && (yield promise),
+		
+		i = -1;
+		while (++i < l) {
+			
+			if (!(i in sources)) continue;
+			
+			if (typeof (source = sources[i]) === 'number') {
+				
+				if (!Array.isArray(source = snapshots[(every = (source = source|0) < 0) ? source * -1 : source])) continue;
+				
+				every || (source = [ ...source ]);
+				
+			} else if (parts[i] && typeof parts[i] === 'object') {
+				backwards = parts[i][Strings.sym.backwards],
+				every = parts[i][Strings.sym.every];
+			}
+			
+			composed = Composer[backwards ? 'everyReverse' : every ? 'every' : 'mix'](composed, source);
+			
+		}
+		
+		return composed;
+		
+	}
+	static replaceValue(source, target, value) {
+		
+		if (!source) return source;
+		
+		const constructor = source.constructor;
+		
+		if (constructor !== Array || constructor !== Object) return source;
+		
+		const keys = Object.keys(source), l = keys.length, replaced = constructor === Array ? [] : {};
+		let i,k,s;
+		
+		i = -1;
+		while (++i < l)
+			replaced[k = keys[i]] = (s = source[k]) === target ? value : Composer.replaceValue(s, target, value);
+		
+		return source;
+		
+	}
+	static *getComposer(parts) {
+		
+		let i,i0,l0,pi,pl, p, nodes,propertyName, composed, suppresses, source, resolver, every,backwards;
+		const	l = (Array.isArray(parts) ? parts : (parts = [ parts ])).length, URLs = [],
+				values = [], snapshots = [], sources = [],
+				errored = Symbol(),
+				promise = new Promise(rs => resolver = rs),
+				promised = (v, promise, snapshot, source) => {
+					
+					const i = snapshot.indexOf(promise);
+					
+					i === -1 || (
+						v === errored ?	(snapshot.splice(i, 1), source && source.splice(i, 1)) :
+												(snapshot[i] = v, source && (source[i] = v))
+					),
+					++pi === pl && (snapshot.flat(1), source && source.flat(1), resolver());
+					
+				};
+		
+		i = -1, pi = pl = 0, composed = [];
+		while (++i < l) {
+			
+			switch (typeof (p = parts[i])) {
+				
+				case 'object':
+				
+				if (!p) continue;
+				
+				if (suppresses = 'suppressed' in p) {
+					
+					values.push(...Composer.compose([ p.suppressed ]));
+					
+					break;
+					
+				}
+				
+				if (Array.isArray(p)) {
+					
+					i0 = -1, l0 = p.length;
+					while (++i0 < l0) Composer.concat(Composer.compose(p[i0]), values);
+					
+					break;
+					
+				}
+				
+				i0 = -1, l0 = p.v.length;
+				while (++i0 < l0) Composer.replaceValue(p.v[i], Composer.$, values), Reflect.apply(...p.v[i]);
+				//coco Reflection.apply の対象が values ではなくその各要素である時
+				
+				if (p.selector) {
+					
+					Composer.select(p.urls, p.selector, p.propertyName, p.rxSrc, p.interval, p.timeout, values);
+					
+				} else if ('from' in p || 'to' in p || 'value' in p)
+					Composer.increase(p?.from ?? 0, p?.to ?? 1, p?.value ?? 1, values);
+				
+				Array.isArray(p[Composer.reflections]) && Composer.applyAll(p[Composer.reflections], values);
+				
+				break;
+				
+				case 'number':
+				
+				snapshots[i] = sources[i] = p;
+				
+				continue;
+				
+				default: values[0] = p;
+				
+			}
+			
+			snapshots[i] = [ ...(suppresses ? values : (sources[i] = [ ...values ])) ],
+			
+			i0 = -1, l0 = values.length;
+			while (++i0 < l0) values[i0] instanceof Promise && (
+					++pl,
+					values[i0].then(v => v).catch(error => (console.error(error), errored)).then(((promise, ss, src) => v => promised(v, promise, ss, src))(values[i0], snapshots[i], sources[i]))
+				);
+			
+			values.length = 0, suppresses = null;
 			
 		}
 		
