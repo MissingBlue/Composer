@@ -24,8 +24,8 @@ export class Indexer {
 		
 		if (!(input in cache)) {
 			
-			const	cacheData = cache[input] = { indices: [], lastIndices: [], matched },
-					{ indices, lastIndices } = cacheData, 
+			const	cacheData = cache[input] = { indices: [], lastIndices: [], matched, indexed: [] },
+					{ indices, lastIndices, indexed } = cacheData, 
 					l = matched.length,
 					handles = typeof handler === 'function';
 			let i,i0, m;
@@ -33,7 +33,7 @@ export class Indexer {
 			i = i0 = -1;
 			while (++i < l)	(m = matched[i]).captor = this,
 									(!handles || handler(m, i,l, cacheData)) &&
-										(lastIndices[m.indexed = ++i0] = (indices[i0] = m.index) + m[0].length);
+										(indexed[m.indexed = ++i0] = m, lastIndices[i0] = (indices[i0] = m.index) + m[0].length);
 			
 		}
 		
@@ -254,6 +254,33 @@ export class Chr extends Unit {
 		
 	}
 	
+	test(str, ...masks) {
+		
+		const data = this.index(str), indexed = data?.indexed, l = indexed.length, l0 = masks.length;
+		
+		if (!l0) return !!l;
+		
+		let i,i0,i1,l1,idx,len,mask,m;
+		
+		i = -1;
+		while (++i < l) {
+			
+			i0 = -1, len = (idx = indexed[i].index) + indexed[i][0].length;
+			while (++i0 < l0) {
+				
+				i1 = -1, l1 = (mask = masks[i0]).length;
+				while (++i1 < l1 && ((m = mask[i1]).lo < len && idx < m.ro));
+				if (i1 < l1) return true;
+				
+			}
+			
+		}
+		
+		return false;
+		
+		
+		
+	}
 	// 第一引数 str でこのインスタンスのメソッド match を実行した結果から、
 	// 第二引数 masks に指定された任意の数の文字列範囲を示す位置情報の外側にあるもののみを絞り込んだ結果を含んだ Object を返す。
 	// 絞り込んだ結果は matched、そして maskIndices の内側にあると判定された文字の位置情報は masked に配列の要素として示される。
@@ -268,6 +295,7 @@ export class Chr extends Unit {
 		
 		const	data = { ...this.index(str), unmasked: [], masked: [] }, matched = data.matched, l = matched.length,
 				unmasked = data.unmasked, l0 = masks.length;
+		
 		let i,umi;
 		
 		i = umi = -1;
@@ -333,10 +361,10 @@ export class Chr extends Unit {
 		
 		if (!(chr instanceof Chr)) return false;
 		
-		const u = this.unit, u0 = chr.unit, s = this.seq.unit, s0 = chr.seq.unit;
+		const u = this.unit, u0 = chr.unit, s = this.seq?.unit, s0 = chr.seq?.unit;
 		
 		return u.source === u0.source && u.flags === u0.flags &&
-			s.source === s0.source && s.flags === s0.flags && s.repetition === s0.repetition;
+			s?.source === s0?.source && s?.flags === s0?.flags && s?.repetition === s0?.repetition;
 	}
 	
 	// このオブジェクトのインスタンを String.prototype.matchAll の第一引数に与えた時にこのメソッドが実行される。
@@ -386,6 +414,8 @@ export class Term extends Array {
 		if (!lL) return locales;
 		
 		const	equals = r && l.equals(r), rI = equals ? lI : (r || l).mask(str, ...masks).unmasked, rL = rI.length;
+		// 最長一致にするために、rI の値を reverse() して設定するように変更したが、影響不明。
+		//const	equals = r && l.equals(r), rI = equals ? lI : (r || l).mask(str, ...masks).unmasked.reverse(), rL = rI.length;
 		
 		if (!rL) return locales;
 		
@@ -911,8 +941,8 @@ export class Terms extends Array {
 				
 			} else if (term instanceof Term) {
 				
-				any[++ai] = term.locate(str, ...any).completed,
-				term[Terms.unmasks] || (masks[++mi] = any[ai]);
+				(result = term.locate(str, ...any).completed).length &&
+					(any[++ai] = result, term[Terms.unmasks] || (masks[++mi] = result));
 				
 			}
 			
@@ -1112,92 +1142,6 @@ export class ParseHelper extends Terms {
 		
 	}
 	
-	//remapPrecedenceTerm(precedenceRemapper, esc = this.esc) {
-	//	
-	//	const	pd = this.constructor[ParseHelper.symbol.precedenceDescriptors],
-	//			map = this.map,
-	//			setTermTo = ParseHelper.setTermTo;
-	//	let k, t;
-	//	
-	//	this.esc = esc = esc instanceof Sequence ? esc : typeof esc === 'string' ? new Sequence(esc) : null;
-	//	
-	//	if (precedenceRemapper && typeof precedenceRemapper === 'object')
-	//		for (k in precedenceRemapper)
-	//			(t = this[k]) && map.delete(t),
-	//			setTermTo(pd, k, (t = precedenceRemapper[k]) instanceof Term ? t : new Term(t, esc));
-	//	
-	//	return this.setPrecedence(pd, this.esc, this[ParseHelper.symbol.precedence] = new Terms(), map);
-	//	
-	//}
-	//setPrecedence(precedenceDescriptors, esc, terms = [], map = new Map()) {
-	//	
-	//	const l = (Array.isArray(precedenceDescriptors) ? precedenceDescriptors : [ precedenceDescriptors ]).length;
-	//	let i,ti,si, pd, term, callback;
-	//	
-	//	i = ti = si = -1, esc = esc instanceof Sequence ? esc : typeof esc === 'string' ? new Sequence(esc) : null;
-	//	while (++i < l) {
-	//		
-	//		if (Array.isArray(pd = precedenceDescriptors[i])) {
-	//			
-	//			this.setPrecedence(pd, esc, terms[++ti] = [], map);
-	//			
-	//		} else if (pd && typeof pd === 'object') {
-	//			
-	//			term = terms[++ti] = this[pd.name] =
-	//				pd.term instanceof Term ? pd.term : new Term(pd.term, 'esc' in pd ? pd.esc : esc),
-	//			
-	//			(callback = this.getTermCallback(pd.callback)) && map.set(term, callback),
-	//			pd.super && (this.super[++si] = term);
-	//			
-	//		}
-	//		
-	//	}
-	//	
-	//	return terms;
-	//	
-	//}
-	//setPrecedence(precedenceDescriptors, esc, terms = [], map = new Map()) {
-	//	
-	//	const l = (Array.isArray(precedenceDescriptors) ? precedenceDescriptors : [ precedenceDescriptors ]).length;
-	//	let i,ti,si, pd, term, callback;
-	//	
-	//	i = ti = si = -1;
-	//	while (++i < l) {
-	//		
-	//		if (Array.isArray(pd = precedenceDescriptors[i])) {
-	//			
-	//			this.setPrecedence(pd, esc, terms[++ti] = [], map);
-	//			
-	//		} else if (pd && typeof pd === 'object') {
-	//			
-	//			term = terms[++ti] = this[pd.name] = pd.term instanceof Term ? pd.term : new Term(pd.term, pd?.esc ?? esc),
-	//			(callback = this.getTermCallback(pd.callback)) && map.set(term, callback),
-	//			pd.super && (this.super[++si] = term);
-	//			
-	//		}
-	//		
-	//	}
-	//	
-	//	return terms;
-	//	
-	//}
-	//getTermCallback(reflector) {
-	//	
-	//	let handler, scope, args;
-	//	
-	//	typeof reflector === 'function' ?
-	//		(handler = reflector, scope = this) :
-	//	reflector && typeof reflector === 'object' &&
-	//		(
-	//			handler = reflector.handler,
-	//			scope = 'scope' in reflector ? reflector.scope : this,
-	//			args = Array.isArray(reflector.args) ? reflector.args : 'args' in reflector ? [ reflector.args ] : []
-	//		);
-	//	
-	//	return handler && (args ? handler.bind(scope, ...args) : handler.bind(scope));
-	//	
-	//}
-	
 	safeReturn(v) {
 		const c = v?.constructor;
 		return c === Array ? [ ...v ] : c === Object ? { ...v } : v;
@@ -1276,7 +1220,7 @@ export class Strings {
 	
 	static anonAssignKey = Symbol('Strings.anonAssignKey');
 	
-	constructor(sp, exp, desc) {
+	constructor(param, sp, exp, desc) {
 		
 		sp = this.sp = sp instanceof StringsParser ? sp : new StringsParser(sp);
 		
@@ -1299,10 +1243,14 @@ export class Strings {
 		const parameters = this.sp.get(str, assigned), pl = parameters.length, esc = this.sp.esc;
 		let i,i0,l0, p, args;
 		
+		return parameters;
+		
 		i = -1;
 		while (++i < pl) {
 			
 			if (!(p = parameters[i]) || typeof p !== 'object') continue;
+			
+			p = this.param.get(p.inners[0], assigned);
 			
 			if (Array.isArray(args = (p = parameters[i]).args) && (l0 = args.length)) {
 				
@@ -1345,45 +1293,47 @@ export class StringsParser extends ParseHelper {
 		
 		// str = string, nst = nest, ref = reference, blk = block
 		this[ParseHelper.symbolNames] = [
+			'str', 'nst', 'ref', 'syx',
 			're', 'evl', 'fnc', 'dom', 'amp', 'frk', 'ech', 'clc',
 			'backwards', 'every'
 		],
 		
-		this.syx = {
+		(this.syx = {
+			str: [ "'", "'" ],
+			nest: [ '<', '>' ],
+			ref: [ '<', '>' ],
 			l: '[',
 			r: ']',
 			assign: '=',
 			suppressor: ';',
 			separator: ':',
 			comma: new Chr(/[\s\t]*,[\s\t]*/g)
-		};
+		}).assignment =
+			new Chr(new RegExp(`[${Unit.escapeRegExpPattern(this.syx.suppressor + this.syx.separator)}]`, 'g'));
 		
 		const	s = ParseHelper.setSymbols(this),
-				{ l, r, assign, suppressor, separator } = this.syx,
-				assignment = this.syx.assignment = new RegExp(`[${Unit.escapeRegExpPattern(suppressor + separator)}]`, 'g');
+				{ str,nest,ref, l, r, assign, suppressor, separator } = this.syx,
+				assignment = this.syx.assignment;
 		
 		this[ParseHelper.precedenceDescriptors] = [
-			{ name: 'str', term: [ "'", "'" ], unmasks: true },
-			{ name: 'nst', term: [ '<', '>' ], callback: StringsParser.nest },
-			{ name: 'ref', term: [ '*', '*' ], callback: StringsParser.reference },
-			//{
-			//	name: s._syx,
-			//	term: [ '[', '=', ';', ':', ']' ],
-			//	callback: Strings.parse
-			//},
-			//{
-			//	name: s.syx,
-			//	term: [ '[', /(?:=\s*?(?<assign>[a-zA-Z_$][\w$]*?))?/g, /(?:(?:;|\:)\s*?(?<option>.*?))?/g, ':', ']' ],
-			//	callback: Strings.parse
-			//},
+			{ name: s.str, term: str, unmasks: true },
+			{ name: s.nst, term: nest, callback: StringsParser.nest },
+			{ name: s.ref, term: ref, callback: StringsParser.reference },
+			{ name: s.syx, term: [ l, r ], callback: StringsParser.parse },
 			// sya = syntax assign
-			{ name: 'sya', term: [ l, assignment, r ], callback: StringsParser.parse },
-			{ name: 'syx', term: [ l, assignment, separator, r ], callback: StringsParser.parse },
+			//{ name: 'sya', term: [ l, assignment, r ], callback: StringsParser.parse },
+			//{ name: 'syx', term: [ l, assignment, separator, r ], callback: StringsParser.parse },
 			//{
 			//	name: s._syx,
 			//	term: [ '[', /(?:=\s*?(?<assign>[a-zA-Z_$][\w$]*?))?\s*?(?:(?:;|\:)\s*?(?<option>.*?))?\s*?:/g, ']' ],
 			//	callback: Strings.parse
 			//},
+		];
+		
+		this.parameterPrecedence = [
+			{ name: s.str, term: str, esc: null },
+			{ name: s.nst, term: nest, esc: null },
+			{ name: s.syx, term: [ l, r ], esc: null },
 		];
 		
 	}
@@ -1393,13 +1343,20 @@ export class StringsParser extends ParseHelper {
 	}
 	static parse(mask, masks, input, detail, self) {
 		
-		const	{ assign, suppressor } = StringsParser.syx,
-				splitted = mask.splitted,
+		const	{ assign, assignment, suppressor } = StringsParser.syx;
+		
+		if (!assignment.test(mask.inners[0], ...this.paramMask.getMasks(mask.inners[0]).masks)) return mask.$;
+		
+		//coco
+		
+		return mask;
+		
+		const	splitted = mask.splitted,
 				header = splitted[1].split(assign),
 				descriptor = header[0]?.trim?.(),
 				label = header?.[1]?.trim?.(),
 				suppresses = suppressor instanceof RegExp ? suppressor.test(splitted[2][0]) : splitted[2][0] === suppressor;
-		let i,l, option, args, descriptor;
+		let i,l, option, args, v;
 		
 		switch (mask.captor) {
 			
@@ -1415,35 +1372,21 @@ export class StringsParser extends ParseHelper {
 		
 		args &&= this.argMask.split(args.trim(), StringsParser.syx.comma),
 		
-		descriptor = { descriptor, label, option, args };
-		//
-		//const	parameter = { descriptor, label, suppresses, option, args };
-		//
-		//parameter.v = this.desc.get(parameter, this.assigned, arguments);
-		//
-		//return parameter;
+		v = { descriptor, label, option, args };
 		
-		return suppresses ? { suppressed: descriptor } : descriptor;
+		return suppresses ? { suppressed: v } : v;
 		
 	}
 	
 	constructor(configuration) {
 		
-		//super(precedenceRemapper, Strings.esc);
 		super(configuration, StringsParser);
 		
-		this.argMask = new Terms(this.termOf('str'), this.termOf('nst'), this.termOf('sya'), this.termOf('syx'));
+		const s = StringsParser.symbol;
 		
-		//const es = Expression.symbol;
-		//
-		//this.exp = new Expression({ replacer: { [es.str]: this.termOf('str'), [es.evl]: this.termOf('evl') } }),
-		//
-		//this.argMask = new Terms(this.termOf('str'), this.termOf('nst'), this.termOf('sya'), this.termOf('syx'));
-		//
-		//this.desc = new StringsDescriptor(),
-		//
-		//this.assigned = {},
-		//this.unlabels = [];
+		this.paramMask = new Terms({ precedence: StringsParser.parameterPrecedence, defaultThis: this, replacer: { [s.str]: [ ...this.termOf('str') ], [s.nst]: [ ...this.termOf('nst') ], [s.syx]: [ ...this.termOf('syx') ] } }),
+		
+		this.argMask = new Terms(this.termOf('str'), this.termOf('nst'), this.termOf('sya'), this.termOf('syx'));
 		
 	}
 	
@@ -1508,18 +1451,6 @@ export class StringsParser extends ParseHelper {
 	//	
 	//}
 	
-	//書き換え中でコメントにしているだけで、必須の処理で消してはいけない。
-	//[ParseHelper.symbol.after](parsed, parsedLength, plot, plotLength, input, detail, self) {
-	//	
-	//	const composed = Composer.compose(parsed), cl = composed.length;
-	//	let i;
-	//	
-	//	i = -1;
-	//	while (++i < cl) composed[i] = this.esc.replace(composed[i]);
-	//	
-	//	return composed;
-	//	
-	//}
 }
 
 export class StringsExpression extends ParseHelper {
@@ -1566,28 +1497,6 @@ export class StringsExpression extends ParseHelper {
 		}
 		
 	};
-	//static setTermTo(hierarchyDescriptors, name, term) {
-	//	
-	//	const l = hierarchyDescriptors.length;
-	//	let i, hd;
-	//	
-	//	i = -1;
-	//	while (++i < l) {
-	//		
-	//		if ((hd = hierarchyDescriptors[i]).constructor === Array) {
-	//			
-	//			StringsExpression.setTermTo(hd, name, term);
-	//			
-	//		} else if (hd && typeof hd === 'object' && hd.name === name) {
-	//			
-	//			hd.term = term;
-	//			return;
-	//			
-	//		}
-	//		
-	//	}
-	//	
-	//}
 	static add(v, left, right, idx, ldx, rdx, parsed, parsedLength, plot, plotLength, input, detail, self) {
 		
 		return [
@@ -1624,9 +1533,17 @@ export class StringsExpression extends ParseHelper {
 		];
 		
 	}
-	static nai(v, left, right, idx, ldx, rdx, parsed, parsedLength, plot, plotLength, input, detail, self) {
+	static kwd(v, left, right, idx, ldx, rdx, parsed, parsedLength, plot, plotLength, input, detail, self) {
 		
-		return [ idx, 1, undefined ];
+		switch (v) {
+			case 'nai': v = null; break;
+			case 'hu': v = undefined; break;
+			case 'shin': v = true; break;
+			case 'gi': v = false; break;
+			default: throw new SyntaxError(`Got an unknown keyword "${v}".`);
+		}
+		
+		return [ idx, 1, v ];
 		
 	}
 	
@@ -1639,7 +1556,7 @@ export class StringsExpression extends ParseHelper {
 		
 		const	s = ParseHelper.setSymbols(this),
 				opsPrecedence = this.opsPrecedence = [
-					{ sym: s.nai, callback: StringsExpression.nai, kw: [ 'nai' ] },
+					{ sym: s.kwd, callback: StringsExpression.nai, kw: [ 'nai', 'hu', 'shin', 'gi' ] },
 					{ sym: s.div, callback: StringsExpression.div, kw: [ '/' ] },
 					{ sym: s.mul, callback: StringsExpression.mul, kw: [ '*' ] },
 					{ sym: s.sub, callback: StringsExpression.sub, kw: [ '-' ] },
@@ -1670,59 +1587,7 @@ export class StringsExpression extends ParseHelper {
 		
 		super(configuration, StringsExpression);
 		
-		//const s = StringsExpression[ParseHelper.symbol];
-		
-		//this.opsSymbol = {
-		//	'+': Symbol(),
-		//	'-': Symbol(),
-		//	'/': Symbol(),
-		//	'*': Symbol(),
-		//	'nai': Symbol()
-		//},
-		//this.opsIndex = {
-		//	[ s['+'] ]: StringsExpression.add,
-		//	[ s['-'] ]: StringsExpression.sub,
-		//	[ s['/'] ]: StringsExpression.div,
-		//	[ s['*'] ]: StringsExpression.mul,
-		//	[ s['nai'] ]: StringsExpression.nai
-		//},
-		//this.precedence = [
-		//	s['nai'],
-		//	s['/'],
-		//	s['*'],
-		//	s['-'],
-		//	s['+']
-		//];
-		
-		//this.map = new Map(),
-		//
-		//this.remapPrecedenceTerm(term, this.esc = esc instanceof Sequence ? esc : new Sequence('\\'));
-		
 	}
-	
-	//remapPrecedenceTerm(term, esc = this.esc) {
-	//	
-	//	const hd = this.hierarchyDescriptors, map = this.map, setTermTo = StringsExpression.setTermTo;
-	//	let k, t,t0;
-	//	
-	//	for (k in term)	(t = term[k]) instanceof Term || (t = new Term(t, esc)),
-	//							(t0 = this[k]) && map.delete(t0),
-	//							setTermTo(hd, k, t);
-	//	
-	//	return this.setPrecedence(hd, this.esc, this[ParseHelper.symbol.hierarchy] = new Terms(), map);
-	//	
-	//}
-	
-	//[ParseHelper.main](block, parsed, plot, plotLength, input, detail, self) {
-	//	
-	//	if (typeof block === 'string') return ParseHelper.deletes;
-	//	//coco
-	//	
-	//	const inner = block.inners[0] || block.$;
-	//	
-	//	return block.captor?.callback?.(inner, ...arguments) ?? ParseHelper.deletes;
-	//	
-	//}
 	
 	[ParseHelper.after](parsed, parsedLength, plot, plotLength, input, detail, self) {
 		
@@ -1874,12 +1739,26 @@ class Counter {
 		// 上の記述は謎だが、Composer.$ は、実行時に、生成する文字列を列挙する Array に置換される。
 		const reflections = [ [ this.count, Composer.$, [ from, to, value ] ] ];
 		
+		reflections[Composer.reflections] = true,
+		
 		Number.isNaN(typeof (pad = parseInt(pad))) || !pad ||
 			(reflections[1] = [ String.prototype[pad > 0 ? 'padStart' : 'padEnd'], Composer.$, [ Math.abs(pad), separator ] ]);
 		
 		return reflections;
 		
 	}
+	
+	// 第一引数 from の値を、第二引数 to の値になるまで第三引数 value を加算し、
+	// その過程のすべての演算結果を第四引数 values に指定された配列に追加する。
+	// 例えば increase(2, 5, 1) の場合、戻り値は [ 2, 3, 4, 5 ] になる。
+	// from, to には文字列を指定できる。この場合、from が示す文字列のコードポイントから、
+	// to が示す文字列のコードポイントまで、value を加算し続ける。
+	// increase('a', 'e', 1) であれば戻り値は [ 'a', 'b', 'c', 'd', 'e' ] である。
+	// from, to いずれの場合も、指定した文字列の最初の一文字目だけが演算の対象となることに注意が必要。
+	// increase('abcd', 'efgh', 1) の戻り値は先の例の戻り値と一致する。
+	// 無限ループ忌避のため、value は常に自然数に変換される。
+	// 一方で value は負の値を受け付け、指定すると出力の末尾は常に to の値に丸められる。
+	// increase(0,3,2) の戻り値は [ 0, 2 ] だが、 increase(0,3,-2) の戻り値は [ 0, 2, 3 ] である。
 	static count(from = 0, to = 1, value = 1) {
 		
 		if (!value) return (this[this.length] = from);
@@ -1927,355 +1806,8 @@ class Counter {
 	
 }
 strings.register([ '+', 'cnt' ], [ Counter.describe, Counter ]);
-//export class Args extends ParseHelper {
-//	
-//	static {
-//		
-//		const ps = ParseHelper.symbol;
-//		
-//		this.esc = '\\',
-//		
-//		this[ps.symbolNames] = [ 'str', 'nst', 'sep' ],
-//		
-//		const	s = ParseHelper.setSymbols(this);
-//		
-//		this[ps.precedenceDescriptors] = [
-//			{ name: s.str, term: [ "'", "'" ], super: true },
-//			{ name: s.nst, term: [ '<', '>' ], super: true },
-//			{ name: s.sep, term: [ ',' ] },
-//		];
-//		
-//	}
-//	
-//	constructor(precedenceRemapper, esc) {
-//		
-//		super(precedenceRemapper, esc);
-//		
-//	}
-//	
-//	[ParseHelper.symbol.main]() {
-//		
-//		
-//		
-//	}
-//	
-//}
 
-//export class Syntax extends ParseHelper {
-//	
-//	static descriptor = {
-//		
-//		eval(inner, block, parsed, plot, plotLength, input, detail, self) {
-//			
-//			return (new Function('detail', inner))(detail.v);
-//			
-//		},
-//		echo(inner, block, parsed, plot, plotLength, input, detail, self) {
-//			
-//			const	args = this.or.split(inner, ...this.frkArgHierarchy.getMasks(inner).masks),
-//					hasOpts = args.length > 1,
-//					arg = hasOpts ? args[1] : args[0],
-//					opts = hasOpts ? this.getArgs(args[0], detail, this.argHierarchy) : null,
-//					l = opts?.[0] ?? 1,
-//					separator = opts?.[1],
-//					l0 = l - 1,
-//					values = [];
-//			let i,ai, v, arg0, parser;
-//			
-//			i = ai = -1, values[ParseHelper.splices] = true;
-//			while (++i < l) {
-//				arg0 = this.el.replace(this.eI.replace(this.ei.replace(arg, i), i + 1), l),
-//				(v = (parser = this.getParser(arg0, detail)).next()).done ?
-//					(values[++ai] = v.value) : (ai = values.push(...parser.next().value) - 1),
-//				separator && i < l0 && (values[++ai] = separator);
-//			}
-//			
-//			return values;
-//			
-//		},
-//		reflection(inner, block, parsed, plot, plotLength, input, detail, self) {
-//			
-//			const args = this.getArgs(inner, detail, this.argHierarchy);
-//			
-//			return {
-//				[Composer.reflections]: [
-//					{ value: args[0], name: args[1], args: args.slice(2) }
-//				]
-//			};
-//			
-//		},
-//		consecutiveNumber(inner, block, parsed, plot, plotLength, input, detail, self) {
-//			
-//			const	args = this.getArgs(inner, detail, this.argHierarchy),
-//					v = { from: args[0], to: args[1], value: args[2] };
-//			
-//			args.length > 3 && (
-//				v[Composer.reflections] = [
-//					{
-//						name: (args[3] = args?.[3] ?? 0) > 0 ? 'padStart' : 'padEnd',
-//						args: [ Math.abs(args[3]), args?.[4] ?? undefined ]
-//					}
-//				]
-//			);
-//			
-//			return v;
-//			
-//		},
-//		fork(inner, block, parsed, plot, plotLength, input, detail, self) {
-//			
-//			const	args = this.or.split(inner, ...this.frkArgHierarchy.getMasks(inner).masks),
-//					l = args.length,
-//					v = [],
-//					addr = detail.addr;
-//			let i,vi, i0,l0, arg;
-//			
-//			i = vi = -1;
-//			while (++i < l) {
-//				i0 = -1, delete detail.addr, l0 = (arg = this.get(args[i], detail))?.length ?? 0;
-//				while (++i0 < l0) v[++vi] = arg[i0];
-//			}
-//			
-//			detail.addr = addr;
-//			
-//			return v;
-//			
-//		},
-//		recycle(inner, block, parsed, plot, plotLength, input, detail, self) {
-//			
-//			return detail.v?.[typeof inner === 'number' ? detail.addr[inner] : inner] ?? '';
-//			
-//		},
-//		selector(inner, block, parsed, plot, plotLength, input, detail, self) {
-//			
-//			const	args = this.or.split(inner, ...this.frkArgHierarchy.getMasks(inner).masks),
-//					addr = detail.addr,
-//					urls = args.length > 1 && (delete detail.addr, this.get(args[0], detail)),
-//					params = this.getArgs(args[+!!urls], (detail.addr ||= addr, detail), this.argHierarchy),
-//					propertyName = params?.[1]?.split('.') ?? [ '', 'textContent' ];
-//			
-//			return {
-//				urls,
-//				selector: params?.[0],
-//				propertyName: propertyName[0] || (propertyName.shift(), propertyName),
-//				rxSrc: params?.[2],
-//				interval: params?.[3] || 1000,
-//				timeout: params?.[4] || 30000
-//			};
-//			
-//		},
-//		calc(inner, block, parsed, plot, plotLength, input, detail, self) {
-//			
-//			return ''+this.getArgs(inner, detail, this.argHierarchy)[0];
-//			
-//		}
-//	};
-//	
-//	static {
-//		
-//		const { symbolNames, symbol } = ParseHelper;
-//		
-//		// str = string, mtk = matryoshka(nest), ref = reference, blk = block
-//		this[symbolNames] = [
-//			'str', 're', 'evl', 'fnc', 'dom', 'amp', 'frk', 'ech', 'clc',
-//			'backwards', 'every'
-//		];
-//		
-//		const s = ParseHelper.setSymbols(this);
-//		
-//		this.precedence = [
-//			{ name: s.str, term: [ "'", "'" ], unmasks: true },
-//			{ name: s.mtk, term: [ '<', '>' ], unmasks: true },
-//			{ name: s.evl, term: [ '`', '`' ], unmasks: true },
-//			//変数名の正規表現 [a-zA-Z_$][\w$]
-//			{ name: s.arg, term: [ '[', /(?<descriptor>(?:))?\s*?(?<assign>=.*?)(?<option>(?:;|\:)(.*?));/g, /.*?/g, ']' ] },
-//			//[
-//			//	{ name: this.sym.fnc, term: [ '{', '}' ], callback: this.descriptor.reflection },
-//			//	{ name: this.sym.dom, term: [ '<', '>' ], callback: this.descriptor.selector },
-//			//	{ name: this.sym.amp, term: [ '[', ']' ], callback: this.descriptor.consecutiveNumber },
-//			//	{ name: this.sym.frk, term: [ '(', ')' ], callback: this.descriptor.fork },
-//			//	{ name: this.sym.ech, term: [ '^', '^' ], callback: this.descriptor.echo },
-//			//	{ name: this.sym.clc, term: [ '~', '~' ], callback: this.descriptor.calc },
-//			//]
-//		];
-//		
-//		this.labeled = ':';
-//		this.stored = ';';
-//		this.flagged = ';';
-//		this.flag = {
-//			backwards: '<=',
-//			every: '>='
-//		};
-//		// 実際に使用される主な構文を優先順で列挙したリスト。
-//		// 一切検証していないが、使用する構文の可否をこの値の変更だけで任意に行なえるかもしれない。
-//		// 例えばセキュアであることが求められる場合、以下の this.evl を消すことで簡易に対応できる。
-//		// str = string, re = recycle, evl = eval,
-//		// fnc = function(reflection), dom = document object model, amp = amplifier, frk = fork, lbl = label,
-//		// ech = echo = dup(old name) = clone
-//		//this.hierarchy = [
-//		//	{ name: this.sym.str, term: [ "'", "'" ], super: true },
-//		//	{ name: this.sym.re, term: [ '*', '*' ], callback: this.descriptor.recycle },
-//		//	{ name: this.sym.evl, term: [ '`', '`' ], callback: this.descriptor.eval },
-//		//	[
-//		//		{ name: this.sym.fnc, term: [ '{', '}' ], callback: this.descriptor.reflection },
-//		//		{ name: this.sym.dom, term: [ '<', '>' ], callback: this.descriptor.selector },
-//		//		{ name: this.sym.amp, term: [ '[', ']' ], callback: this.descriptor.consecutiveNumber },
-//		//		{ name: this.sym.frk, term: [ '(', ')' ], callback: this.descriptor.fork },
-//		//		{ name: this.sym.ech, term: [ '^', '^' ], callback: this.descriptor.echo },
-//		//		{ name: this.sym.clc, term: [ '~', '~' ], callback: this.descriptor.calc },
-//		//	]
-//		//];
-//	}
-//	constructor() {
-//		
-//		super();
-//		
-//		const esc = this.esc = new Sequence(Strings.esc);
-//		
-//		this.setPrecedence(Strings.precedence, esc, this[ParseHelper.precedence] = new Terms(), this.map = new Map()),
-//		this.argHierarchy = new Terms(this[Strings.sym.str], this[Strings.sym.re], this[Strings.sym.evl]),
-//		this.frkArgHierarchy = new Terms(...this.argHierarchy, this[Strings.sym.frk]),
-//		
-//		this.unlabels = [
-//			this[Strings.sym.evl],
-//			this[Strings.sym.frk]
-//		];
-//		
-//		// prm = parameter
-//		this.prm = new Term(
-//			[
-//				/^/g,
-//				new RegExp(`(?:${Unit.escapeRegExpPattern(Strings.stored)}|${Unit.escapeRegExpPattern(Strings.labeled)})`, 'g'),
-//				Unit.escapeRegExpPattern(Strings.flagged)
-//			],
-//			esc
-//		),
-//		
-//		// dot, cmm = comma, or, idt = identify for labeled value
-//		this.dot = new Chr('.', esc),
-//		this.cmm = new Chr(',', esc),
-//		this.or = new Chr('|', esc),
-//		// echo increment, echo length
-//		this.ei = new Chr(/\$i/g, esc),
-//		this.eI = new Chr(/\$I/g, esc),
-//		this.el = new Chr(/\$l/g, esc),
-//		
-//		this.expression = new StringsExpression({ [StringsExpression.symbol.str]: this[Strings.sym.str], [StringsExpression.symbol.evl]: this[Strings.sym.evl] }, esc);
-//		
-//	}
-//	
-//	parse(inner, unlabels) {
-//		
-//		let sLocs;
-//		const	eLocs = this[Strings.sym.evl].locate(inner, sLocs = this[Strings.sym.str].locate(inner).completed).completed,
-//				param = !unlabels && this.prm.locate(inner, sLocs, eLocs).completed?.[0],
-//				settings = param && param.splitted[3].split(' ');
-//		
-//		return {
-//				label: param?.splitted?.[1],
-//				stores: param?.splitted?.[2][0] === Strings.stored,
-//				backwards: settings && settings.indexOf(Strings.flag.backwards) + 1,
-//				every: settings && settings.indexOf(Strings.flag.every) + 1,
-//				strLocs: param ? (sLocs = this[Strings.sym.str].locate(inner = inner.substring(param.ro)).completed) : sLocs,
-//				evlLocs: param ? this[Strings.sym.evl].locate(inner, sLocs).completed : eLocs,
-//				inner
-//			};
-//		
-//	}
-//	
-//	getArgs(str, labeled, hierarchy, passthrough) {
-//		
-//		const	args = this.cmm.split(str, ...hierarchy.getMasks(str).masks), l = args.length,
-//				pt = Array.isArray(passthrough) && passthrough.length;
-//		let i;
-//		
-//		i = -1;
-//		while (++i < l) args[i] = pt && passthrough.indexOf(i) !== -1 ? args[i] : this.expression.get(args[i], labeled);
-//		
-//		return args;
-//		
-//	}
-//	
-//}
-
-export class Composer {
-	
-	static {
-		this.$ = Symbol('$'),
-		this.exec = Symbol('exec'),
-		this.reflections = Symbol('reflections'),
-		this.reflection = Symbol('reflection');
-	}
-	
-	// 第一引数 array の要素を第二引数 values に追加するだけの関数。
-	// 同様の処理は JavaScript のネイティブの機能を用いてよりエコノミーに実現できるが、
-	// ここでは拡張の余地を作ることを目的として実装している。逆に言えばこの関数にそれ以上の意味はない。
-	static concat(array, values = []) {
-		
-		const l = array.length;
-		let i,l0;
-		
-		i = -1, l0 = values.length - 1;
-		while (++i < l) values[++l0] = array[i];
-		
-		return values;
-		
-	}
-	
-	// 第一引数 from の値を、第二引数 to の値になるまで第三引数 value を加算し、
-	// その過程のすべての演算結果を第四引数 values に指定された配列に追加する。
-	// 例えば increase(2, 5, 1) の場合、戻り値は [ 2, 3, 4, 5 ] になる。
-	// from, to には文字列を指定できる。この場合、from が示す文字列のコードポイントから、
-	// to が示す文字列のコードポイントまで、value を加算し続ける。
-	// increase('a', 'e', 1) であれば戻り値は [ 'a', 'b', 'c', 'd', 'e' ] である。
-	// from, to いずれの場合も、指定した文字列の最初の一文字目だけが演算の対象となることに注意が必要。
-	// increase('abcd', 'efgh', 1) の戻り値は先の例の戻り値と一致する。
-	// 無限ループ忌避のため、value は常に自然数に変換される。
-	// 一方で value は負の値を受け付け、指定すると出力の末尾は常に to の値に丸められる。
-	// increase(0,3,2) の戻り値は [ 0, 2 ] だが、 increase(0,3,-2) の戻り値は [ 0, 2, 3 ] である。
-	static increase(from = 0, to = 1, value = 1, values = []) {
-		
-		if (!value) return (values[values.length] = from);
-		
-		const	isNum = typeof from === 'number' && typeof to === 'number', round = value < 0;
-		let i, vl, v;
-		
-		from = isNum ?	(Number.isNaN(v = from === undefined ? 0 : +from) ? (''+from).codePointAt() : v) :
-							(''+from).codePointAt()
-		to = isNum ?	(Number.isNaN(v = to === undefined ? 1 : +to) ? (''+to).codePointAt() : v) :
-							(''+to).codePointAt(),
-		vl = values.length - 1, value = Math.abs(value);
-		
-		if (from < to) {
-			
-			const l = to - from + value;
-			
-			i = -value;
-			while ((i += value) < l) {
-				if ((v = from + i) > to) {
-					if (!round) break;
-					v = to;
-				}
-				values[++vl] = isNum ? ''+v : String.fromCodePoint(v);
-			}
-			
-		} else {
-			
-			const l = to - from - value;
-			
-			i = value;
-			while ((i -= value) > l) {
-				if ((v = from + i) < to) {
-					if (!round) break;
-					v = to;
-				}
-				values[++vl] = isNum ? ''+v : String.fromCodePoint(v);
-			}
-			
-		}
-		
-		return values;
-		
-	}
+class Reflector {
 	
 	// 第一引数に指定された配列の中の記述子に基づいた処理を、
 	// 第二引数に指定された配列の要素に対して行なう。
@@ -2291,17 +1823,222 @@ export class Composer {
 	// 上記記述子の指定内容は、name が示すメソッドに apply を通して反映される。
 	// メソッドの戻り値は values に追加されると同時に、後続のメソッドの実行対象にもなる。これは連続した文字列操作を想定した仕様。
 	// target が true の場合、戻り値ではなく、直近の実行対象が再利用される。
-	static applyAll(apps, values = []) {
+	static describe(methodName, target, ...args) {
 		
-		const l = values.length, l0 = apps.length;
-		//lv = lastValue, ls = lastScope
-		let i,i0, app,v,lv,ls;
+		const reflection = [], reflections = [ reflection ];
 		
-		i = -1;
-		while (++i < l) {
-			i0 = -1, lv = ls = null;
-			while (++i0 < l0) values[i] = lv = (ls = v = ((v = (app = apps[i0])?.value) === true ? ls || lv : v) ?? lv ?? values[i])?.[app.name]?.apply(v, app?.args);
+		reflection[0] = methodName || 'toString',
+		reflection[1] = typeof target === 'boolean' ? (target || (reflection[Composer.each] = true), Composer.$) : target,
+		reflection[2] = args,
+		
+		reflections[Composer.reflections] = true;
+		
+		return reflections;
+		
+	}
+	
+}
+strings.register([ '@', 'app' ], [ Reflector.describe, Reflector ]);
+
+class Selector {
+	
+	static describe(urls, selector = ':root', propertyName = [ 'innerHTML' ], rxSrc, interval = -1, timeout = 30000) {
+		
+		const reflections = [ [ Selector.select, Composer.$, ...args ] ];
+		
+		reflections[Composer.reflections] = true;
+		
+		return reflections;
+		
+	}
+	
+	// 第一引数 urls に指定された配列の要素が示すべき URL にアクセスし、
+	// 取得した HTML を(HTML であるべき) <iframe> に読み込み、
+	// 展開されたドキュメントの第二引数 selector に一致するすべての要素から、第三引数 propertyName に指定された属性値ないしプロパティを取得する。
+	// 取得した値は第六引数 values に指定された配列に列挙される Promise を通じて渡される。
+	// urls が偽を示す時は、このオブジェクトが属するドキュメントに対して上記の処理を同期処理で行なう。
+	// つまり、values の要素には Promise ではなく取得した値がそのまま設定される。
+	// 第四引数 interval に自然数が設定された時、非同期で行なわれる値の取得処理は、
+	// urls に指定された URL 順に、ひとつ処理が完了する毎に intervals で指定したミリ秒待機後、次の要素へ移行するのを urls の末尾まで繰り返す。
+	// 一方 values には戻り値に渡された時点ですべての要素に Promise が設定されている。
+	// 正しく動作すればこの values の末端の Promise の解決がすべての要素の解決を意味することになる。
+	// intervals に自然数以外の値（既定値）を指定すると、すべての URL 先に同時平行してアクセスする。
+	// 第五引数 timeout に自然数が設定されると、それをミリ秒として、timeout までに HTML の取得ができなければ
+	// 強制的にその通信を中断し、該当の Promise を拒否する。timeout は、既定では 30 秒に設定される。
+	// URL 先のドキュメントを、ブラウザーからウェブページへアクセスするのとまったく同じに、実際に完全にブラウザー上で展開するため、
+	// URL の数が多ければ多いほどパフォーマンスの問題が生じる。
+	// また intervals に指定する値が小さければ、アクセス先に経済的なものも含む深刻な損害を与えかねない点に注意しなければならない。
+	// こうした問題を踏まえた上で実行し、実際にアクセスに成功しても、期待した結果は得られないかもしれない。
+	// 特に動的にリソースを読み込むページ上の情報はほとんど正確な結果は期待できない。
+	// このメソッドは、まず対象の URL が示す HTML を文字列として取得したあと、
+	// このスクリプトを読み込んだページ上に追加した iframe の属性 srcdoc にそれを指定する。
+	// つまり HTML の絶対パスは、このスクリプトの実行パスになり、HTML が異なる階層に存在していた場合、HTML 内のすべての相対パスに不整合が生じるのである。
+	// このメソッドが期待する結果を返すのは、概ね静的なページに対してのみである。
+	// これは W3C の定める同一オリジンポリシーによる制限で、サーバーと連携するか、拡張機能上でなければ回避することはできない。
+	//
+	// 入れ子状の Promise が複雑に接続しており、匿名関数を通じたコールバック関数の作成の多用と、
+	// 特定の箇所で Promise を生成元外で解決している点を踏まえなければ、履行の追跡は難しいと思われる。
+	// 通信処理とは関係のない、戻り値の作成を、他の処理と切り分けて捉えることも重要。
+	// さらに、これらの一連の遅延処理の流れは、この関数群の呼び出し元 Composer.getComposer をまたぎ、一方だけの理解では把握に至れない。
+	//
+	// 以下は旧解説。
+	// 第一引数 selector に指定した文字列を、document.querySelectorAll の第一引数にし、
+	// 選択されたすべての要素から、第二引数 propertyName に指定したプロパティの値を取得し、
+	// それを第三引数 values に指定した配列に追加する。
+	static select(urls, selector = ':root', propertyName = [ 'innerHTML' ], rxSrc, interval = -1, timeout = 30000) {
+		
+		if (urls) {
+			
+			Array.isArray(urls) || (urls = [ urls ]);
+			
+			const	URLs = [], l = urls.length, current = location.origin + location.pathname,
+					awaits = (interval = interval|0) > -1,
+					prs = Selector.promiseRemoteSelector;
+			let i;
+			
+			i = -1;
+			while (++i < l) {
+				
+				// 引数 intervals が有効で、かつ urls の数が多い時、恐らくすさまじい数の Promise のネストが発生するだろう。
+				// await を使えばいいかもしれないが、Strings.prototype.get を非同期関数にすることによって生じる影響を検討する気になれない。
+				
+				this[i] = awaits > -1 && i ? 
+					this[i - 1].then((url => () => new Promise(rs => setTimeout(() => prs(url, current, selector, propertyName, rxSrc, timeout, this).catch(error => error).then(v => rs(v)), interval)))(urls[i])) :
+					prs(urls[i], current, selector, propertyName, rxSrc, timeout, this);
+				
+			}
+			
+			return this;
+			
+		} else {
+			
+			return Selector.getNodesValue(document.querySelectorAll(selector), propertyName, rxSrc, this);
+			
 		}
+		
+	}
+	static promiseRemoteSelector(url, current, selector, propertyName, rxSrc, timeout, values = []) {
+		
+		const ac = new AbortController();
+		
+		console.info('[Strings]', 'LOAD', url);
+		
+		return new Promise((rs, rj) => {
+				const ac = new AbortController();
+				fetch(new URL(url, current)+'', { signal: ac.signal }).
+					then(response => rs(response)).catch(error => rj(error)),
+				timeout && setTimeout(() => (ac.abort(), rj(Error('timeouted'))), timeout);
+			}).
+				then(response => response.text()).catch(error => error).
+					then(v => v instanceof Error ? v : Selector.remote(v, selector, propertyName, rxSrc, values));
+		
+	}
+	static remote(html, selector, propertyName, rxSrc, values) {
+		
+		let resolver;
+		const iframe = document.createElement('iframe'),
+				// https://developer.mozilla.org/ja/docs/Web/API/crypto_property
+				signature = crypto.getRandomValues(new Uint32Array(1)).join(),
+				messenger = `<script>
+						const	loaded = event => {
+												removeEventListener('message', loaded),
+												postMessage(
+													{
+														signature: '${signature}',
+														values:	(${Selector.getNodesValue.toString().replace(new RegExp(`^${Selector.getNodesValue.name}`), 'function')})
+																		(document.querySelectorAll('${selector}'), ${JSON.stringify(propertyName)}, ${JSON.stringify(rxSrc || null)})
+													},
+													'${location.origin}'
+												)
+											};
+						addEventListener('DOMContentLoaded', loaded);
+					</script>`,
+				promise = new Promise (rs => resolver = rs),
+				received = message => message.data?.signature === signature && (
+						iframe.contentWindow.removeEventListener('message', received),
+						iframe.remove(),
+						values.push(...message.data.values),
+						resolver(values)
+					),
+				loaded = event => (
+						iframe.removeEventListener(event.type, loaded),
+						iframe.contentWindow.addEventListener('message', received)
+					);
+		
+		iframe.addEventListener('load', loaded),
+		iframe.srcdoc = html + messenger,
+		document.body.appendChild(iframe);
+		
+		return promise;
+		
+	}
+	static getNodesValue(nodes = [], propertyName = [ 'innerHTML' ], rxSrc, values = []) {
+		
+		const	l = nodes.length,
+				requiresAttr = typeof propertyName === 'string',
+				pl = propertyName?.length,
+				rx = rxSrc && new RegExp(rxSrc);
+		let i,i0, vl, v;
+		
+		if (!l || !(requiresAttr || pl)) return values;
+		
+		i = -1, vl = values.length - 1;
+		
+		if (requiresAttr) {
+			
+			while (++i < l) values[++vl] = nodes[i].getAttribute(propertyName) || '';
+			
+		} else if (propertyName[0] === 'style') {
+			
+			while (++i < l) values[++vl] = nodes[i].style.getPropertyValue(propertyName?.[1]) || '';
+		
+		} else {
+		
+			while (++i < l) {
+				
+				i0 = -1, v = nodes[i];
+				while (++i0 < pl && (v = v[propertyName[i0]]) && typeof v === 'object');
+				values[++vl] = v;
+				
+			}
+			
+		}
+		
+		if (rx) {
+			
+			i = -1, vl = values.length;
+			while (++i < vl) values[i] = rx.exec(values[i])?.[0] || '';
+			
+		}
+		
+		return values;
+		
+	}
+}
+strings.register([ '$', 'dom' ], [ Selector.describe, Selector ]);
+
+export class Composer {
+	
+	static {
+		
+		this.$ = Symbol('Composer.$'),
+		this.exec = Symbol('Composer.exec'),
+		this.reflections = Symbol('Composer.reflections'),
+		this.reflection = Symbol('Composer.reflection'),
+		this.each = Symbol('Composer.each');
+		
+	}
+	
+	// 第一引数 array の要素を第二引数 values に追加するだけの関数。
+	// 同様の処理は JavaScript のネイティブの機能を用いてよりエコノミーに実現できるが、
+	// ここでは拡張の余地を作ることを目的として実装している。逆に言えばこの関数にそれ以上の意味はない。
+	static concat(array, values = []) {
+		
+		const l = array.length;
+		let i,l0;
+		
+		i = -1, l0 = values.length - 1;
+		while (++i < l) values[++l0] = array[i];
 		
 		return values;
 		
@@ -2537,109 +2274,6 @@ export class Composer {
 	// 数が満たない場合は生成順を 0 に巻き戻して結合を繰り返し、生成文字列がそれまでの文字列の数を超過する場合はそこで結合を終了する。
 	// 例えばそれまでに生成した文字列が 0,1,2 で、every を持つ記述子が 0,1 だった場合、合成された文字列は 00,11,20 になる。
 	// 同じように、every を持つ記述子が 0,1,2,3 を生成する場合、合成される文字列は 00,11,22 になる。
-	static *_getComposer(parts) {
-		
-		let i,i0,l0,pi,pl, p, nodes,propertyName, composed, neglects, source, resolver, every,backwards;
-		const	l = (Array.isArray(parts) ? parts : (parts = [ parts ])).length, URLs = [],
-				values = [], snapshots = [], sources = [],
-				errored = Symbol(),
-				promise = new Promise(rs => resolver = rs),
-				promised = (v, promise, snapshot, source) => {
-					
-					const i = snapshot.indexOf(promise);
-					
-					i === -1 || (
-						v === errored ?	(snapshot.splice(i, 1), source && source.splice(i, 1)) :
-												(snapshot[i] = v, source && (source[i] = v))
-					),
-					++pi === pl && (snapshot.flat(1), source && source.flat(1), resolver());
-					
-				};
-		
-		i = -1, pi = pl = 0, composed = [];
-		while (++i < l) {
-			
-			switch (typeof (p = parts[i])) {
-				
-				case 'object':
-				
-				if (!p) continue;
-				
-				if (neglects = 'neglect' in p) {
-					
-					values.push(...Composer.compose([ p.neglect ]));
-					
-					break;
-					
-				}
-				
-				if (Array.isArray(p)) {
-					
-					i0 = -1, l0 = p.length;
-					while (++i0 < l0) Composer.concat(Composer.compose(p[i0]), values);
-					
-					break;
-					
-				}
-				
-				if (p.selector) {
-					
-					Composer.select(p.urls, p.selector, p.propertyName, p.rxSrc, p.interval, p.timeout, values);
-					
-				} else if ('from' in p || 'to' in p || 'value' in p)
-					Composer.increase(p?.from ?? 0, p?.to ?? 1, p?.value ?? 1, values);
-				
-				Array.isArray(p[Composer.reflections]) && Composer.applyAll(p[Composer.reflections], values);
-				
-				break;
-				
-				case 'number':
-				
-				snapshots[i] = sources[i] = p;
-				
-				continue;
-				
-				default: values[0] = p;
-				
-			}
-			
-			snapshots[i] = [ ...(neglects ? values : (sources[i] = [ ...values ])) ],
-			
-			i0 = -1, l0 = values.length;
-			while (++i0 < l0) values[i0] instanceof Promise && (
-					++pl,
-					values[i0].then(v => v).catch(error => (console.error(error), errored)).then(((promise, ss, src) => v => promised(v, promise, ss, src))(values[i0], snapshots[i], sources[i]))
-				);
-			
-			values.length = 0, neglects = null;
-			
-		}
-		
-		pl && (yield promise),
-		
-		i = -1;
-		while (++i < l) {
-			
-			if (!(i in sources)) continue;
-			
-			if (typeof (source = sources[i]) === 'number') {
-				
-				if (!Array.isArray(source = snapshots[(every = (source = source|0) < 0) ? source * -1 : source])) continue;
-				
-				every || (source = [ ...source ]);
-				
-			} else if (parts[i] && typeof parts[i] === 'object') {
-				backwards = parts[i][Strings.sym.backwards],
-				every = parts[i][Strings.sym.every];
-			}
-			
-			composed = Composer[backwards ? 'everyReverse' : every ? 'every' : 'mix'](composed, source);
-			
-		}
-		
-		return composed;
-		
-	}
 	static replaceValue(source, target, value) {
 		
 		if (!source) return source;
@@ -2660,7 +2294,7 @@ export class Composer {
 	}
 	static *getComposer(parts) {
 		
-		let i,i0,l0,pi,pl, p, nodes,propertyName, composed, suppresses, source, resolver, every,backwards;
+		let i,i0,l0,i1,l1,pi,pl, p, nodes,propertyName, composed, suppresses, source, resolver, every,backwards;
 		const	l = (Array.isArray(parts) ? parts : (parts = [ parts ])).length, URLs = [],
 				values = [], snapshots = [], sources = [],
 				errored = Symbol(),
@@ -2694,27 +2328,40 @@ export class Composer {
 					
 				}
 				
-				if (Array.isArray(p)) {
-					
-					i0 = -1, l0 = p.length;
-					while (++i0 < l0) Composer.concat(Composer.compose(p[i0]), values);
-					
-					break;
-					
-				}
+				//if (Array.isArray(p)) {
+				//	
+				//	i0 = -1, l0 = p.length;
+				//	while (++i0 < l0) Composer.concat(Composer.compose(p[i0]), values);
+				//	
+				//	break;
+				//	
+				//}
 				
-				i0 = -1, l0 = p.v.length;
-				while (++i0 < l0) Composer.replaceValue(p.v[i], Composer.$, values), Reflect.apply(...p.v[i]);
-				//coco Reflection.apply の対象が values ではなくその各要素である時
-				
-				if (p.selector) {
+				if (Array.isArray(p.v) && p.v[Composer.reflections]) {
 					
-					Composer.select(p.urls, p.selector, p.propertyName, p.rxSrc, p.interval, p.timeout, values);
+					i0 = -1, l0 = p.v.length;
+					while (++i0 < l0) {
+						
+						if (p.v[i][Composer.each]) {
+							
+							i1 = -1, l1 = values.length;
+							while (++i1 < l1)
+								Composer.replaceValue(p.v[i], Composer.$, values[i]), values[i] = Reflect.apply(...p.v[i]);
+							
+						} else Composer.replaceValue(p.v[i], Composer.$, values), Reflect.apply(...p.v[i]);
+						
+					}
 					
-				} else if ('from' in p || 'to' in p || 'value' in p)
-					Composer.increase(p?.from ?? 0, p?.to ?? 1, p?.value ?? 1, values);
+				} else values[0] = p.v;
 				
-				Array.isArray(p[Composer.reflections]) && Composer.applyAll(p[Composer.reflections], values);
+				//if (p.selector) {
+				//	
+				//	Composer.select(p.urls, p.selector, p.propertyName, p.rxSrc, p.interval, p.timeout, values);
+				//	
+				//} else if ('from' in p || 'to' in p || 'value' in p)
+				//	Composer.increase(p?.from ?? 0, p?.to ?? 1, p?.value ?? 1, values);
+				//
+				//Array.isArray(p[Composer.reflections]) && Composer.applyAll(p[Composer.reflections], values);
 				
 				break;
 				
