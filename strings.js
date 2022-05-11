@@ -1,5 +1,13 @@
 export class Indexer {
 	
+	static {
+		
+		this.indexed = Symbol('Indexer.indexed'),
+		this.indices = Symbol('Indexer.indices'),
+		this.lastIndices = Symbol('Indexer.lastIndices');
+		
+	}
+	
 	constructor() {
 		
 		this.cache = {};
@@ -20,20 +28,17 @@ export class Indexer {
 	// ただし、単純に削除した場合、出力から入力を復元することができなくなる点に留意が必要。
 	setCache(matched, handler) {
 		
-		const cache = this.cache, input = matched[0]?.input;
+		const cache = this.cache, input = matched[0]?.input, { indexed, indices, lastIndices } = Indexer;
 		
 		if (!(input in cache)) {
 			
-			const	cacheData = cache[input] = { indices: [], lastIndices: [], matched, indexed: [] },
-					{ indices, lastIndices, indexed } = cacheData, 
-					l = matched.length,
-					handles = typeof handler === 'function';
+			const	v = (cache[input] = matched)[indexed] = [], l = matched.length, handles = typeof handler === 'function';
 			let i,i0, m;
 			
 			i = i0 = -1;
 			while (++i < l)	(m = matched[i]).captor = this,
-									(!handles || handler(m, i,l, cacheData)) &&
-										(indexed[m.indexed = ++i0] = m, lastIndices[i0] = (indices[i0] = m.index) + m[0].length);
+									(!handles || handler(m, i,l)) &&
+										((v[++i0] = m)[lastIndices] = (m[indices] = m.index) + m[0].length);
 			
 		}
 		
@@ -256,7 +261,7 @@ export class Chr extends Unit {
 	
 	test(str, ...masks) {
 		
-		const data = this.index(str), indexed = data?.indexed, l = indexed.length, l0 = masks.length;
+		const indexed = this.index(str)[Indexer.indexed], l = indexed?.length, l0 = masks.length;
 		
 		if (!l0) return !!l;
 		
@@ -293,15 +298,15 @@ export class Chr extends Unit {
 	// 戻り値は { ..., masked: [ 2 ], unmasked: [ 0 ] } である。（上記の例で言えば、文字列としての a の位置は masked に記録されている）
 	mask(str, ...masks) {
 		
-		const	data = { ...this.index(str), unmasked: [], masked: [] }, matched = data.matched, l = matched.length,
-				unmasked = data.unmasked, l0 = masks.length;
+		const	data = { matched: this.index(str), masked: [] },
+				matched = data.matched,
+				unmasked = data.unmasked = [ ...matched[Indexer.indexed] ],
+				l = unmasked.length,
+				l0 = masks.length;
 		
 		let i,umi;
 		
-		i = umi = -1;
-		while (++i < l) 'indexed' in matched[i] && (unmasked[++umi] = matched[i]);
-		
-		if (!l || !l0 || umi++ === -1) return data;
+		if (!(umi = l) || !l0) return data;
 		
 		const masked = data.masked;
 		let i0,i1,l1,um,idx,len,mi,mask;
