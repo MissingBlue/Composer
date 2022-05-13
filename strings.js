@@ -3,8 +3,7 @@ export class Indexer {
 	static {
 		
 		this.indexed = Symbol('Indexer.indexed'),
-		this.indices = Symbol('Indexer.indices'),
-		this.lastIndices = Symbol('Indexer.lastIndices');
+		this.lastIndex = Symbol('Indexer.lastIndex');
 		
 	}
 	
@@ -28,7 +27,7 @@ export class Indexer {
 	// ただし、単純に削除した場合、出力から入力を復元することができなくなる点に留意が必要。
 	setCache(matched, handler) {
 		
-		const cache = this.cache, input = matched[0]?.input, { indexed, indices, lastIndices } = Indexer;
+		const cache = this.cache, input = matched[0]?.input, { indexed, lastIndex } = Indexer;
 		
 		if (!(input in cache)) {
 			
@@ -37,8 +36,7 @@ export class Indexer {
 			
 			i = i0 = -1;
 			while (++i < l)	(m = matched[i]).captor = this,
-									(!handles || handler(m, i,l)) &&
-										((v[++i0] = m)[lastIndices] = (m[indices] = m.index) + m[0].length);
+									(!handles || handler(m, i,l)) && ((v[++i0] = m)[lastIndex] = m.index + m[0].length);
 			
 		}
 		
@@ -252,13 +250,23 @@ export class Chr extends Unit {
 		if (str in this.cache) return this.cache[str];
 		
 		const	matched = [ ...str.matchAll(this.matchesEmpty ? this.unit : this) ],
-				seqLastIndices = this.seq?.index?.(str, true).lastIndices,
-				handler = seqLastIndices && (m => seqLastIndices.indexOf(m.index) === -1);
+				seqs = this.seq?.index?.(str, true);
 		
-		return this.setCache(matched, handler);
+		if (!seqs) return this.setCache(matched);
+		
+		const seqLastIndices = [], lastIndex = Indexer.lastIndex, l = seqs.length;
+		let i,i0,seq;
+		
+		i = i0 = -1;
+		while (++i < l) lastIndex in (seq = seqs[i]) && (seqLastIndices[++i0] = seq[lastIndex]);
+		
+		return this.setCache(matched, m => seqLastIndices.indexOf(m.index) === -1);
 		
 	}
 	
+	// str の中から、インスタンスのプロパティ unit に一致する文字列が、masks が示す文字列範囲外に存在するかどうかを真偽値で返す。
+	// Chr.prototype.index に少し似ているが、文字列の一致の確認だけ目的の場合、
+	// index はこのメソッドと比べて冗長で不要な情報を多く含んだ戻り値を作成する。
 	test(str, ...masks) {
 		
 		const indexed = this.index(str)[Indexer.indexed], l = indexed?.length, l0 = masks.length;
@@ -300,8 +308,8 @@ export class Chr extends Unit {
 		
 		const	data = { matched: this.index(str), masked: [] },
 				matched = data.matched,
-				unmasked = data.unmasked = [ ...matched[Indexer.indexed] ],
-				l = unmasked.length,
+				unmasked = data.unmasked = matched && [ ...matched[Indexer.indexed] ],
+				l = unmasked?.length,
 				l0 = masks.length;
 		
 		let i,umi;
@@ -332,14 +340,14 @@ export class Chr extends Unit {
 		return data;
 		
 	}
-	split(str, ...masks) {
+	split(str, limit = Infinity, ...masks) {
 		
-		const separators = this.mask(...arguments).unmasked, l = separators.length, splitted = [];
+		const separators = this.mask(str, ...masks).unmasked, l = separators.length, splitted = [];
 		let i,i0, cursor,idx,separator;
 		
-		i = i0 = -1, cursor = 0;
-		while (++i < l)	splitted[++i0] = str.substring(cursor, idx = (separator = separators[i]).index),
-								cursor = idx + separator[0].length;
+		i = i0 = -1, cursor = 0, Number.isNaN(--limit|0) && (limit = Infinity);
+		while (++i < l && i0 < limit)	splitted[++i0] = str.substring(cursor, idx = (separator = separators[i]).index),
+												cursor = idx + separator[0].length;
 		splitted[++i0] = str.substring(cursor);
 		
 		return splitted;
@@ -347,7 +355,7 @@ export class Chr extends Unit {
 	}
 	replace(str, replacer, ...masks) {
 		
-		return this.split(str, ...masks).join(replacer);
+		return this.split(str, undefined, ...masks).join(replacer);
 		
 	}
 	
@@ -964,9 +972,9 @@ export class Terms extends Array {
 	//	
 	//}
 	
-	split(str, separator) {
+	split(str, limit, separator) {
 		
-		return separator.split(str, ...this.getMasks(str).masks);
+		return separator.split(str, limit, ...this.getMasks(str).masks);
 		
 	}
 	
@@ -1232,7 +1240,7 @@ export class Strings {
 		const	es = StringsExpression.symbol;
 		
 		this.exp = exp instanceof StringsExpression ?
-			exp : new StringsExpression({ replacer: { [es.str]: sp.termOf('str'), [es.evl]: sp.termOf('evl') } }),
+			exp : new StringsExpression({ replacer: { [es.str]: sp.termOf('str'), [es.nst]: sp.termOf('nst'),  } }),
 		
 		this.desc = desc instanceof StringsDescriptor ? desc : new StringsDescriptor(),
 		
@@ -1245,22 +1253,28 @@ export class Strings {
 		
 		(assigned && typeof assigned === 'object') || (assigned = { [Strings.anonAssignKey]: assigned });
 		
-		const parameters = this.sp.get(str, assigned), pl = parameters.length, esc = this.sp.esc;
+		const	parameters = this.sp.get(str, assigned), pl = parameters.length, esc = this.sp.esc,
+				{ syntaxError, nests } = StringsExpression;
 		let i,i0,l0, p, args;
-		
-		return parameters;
 		
 		i = -1;
 		while (++i < pl) {
 			
 			if (!(p = parameters[i]) || typeof p !== 'object') continue;
 			
-			p = this.param.get(p.inners[0], assigned);
+			p.suppressed && (p = p.suppressed);
 			
-			if (Array.isArray(args = (p = parameters[i]).args) && (l0 = args.length)) {
+			if (Array.isArray(args = p.args) && (l0 = args.length)) {
 				
+				hi(p.args);
 				i0 = -1;
-				while (++i0 < l0) args[i0] = this.exp.get(args[i0], assigned);
+				while (++i0 < l0 && (args[i0] = this.exp.get(args[i0], assigned)) !== syntaxError)
+					args[i0][nests] && (args[i0] = this.get(args[i0], assigned));
+				
+				if (i0 < l0) {
+					parameters[i] = p.suppressed ? p.suppressed.source : p.source;
+					continue;
+				}
 				
 			}
 			
@@ -1268,12 +1282,10 @@ export class Strings {
 			
 		}
 		
-		return parameters;
-		
 		const composed = Composer.compose(parameters), cl = composed.length;
 		
-		i = -1;
-		while (++i < cl) composed[i] = esc.replace(composed[i]);
+		//i = -1;
+		//while (++i < cl) composed[i] = esc.replace(composed[i]);
 		
 		return composed;
 		
@@ -1298,7 +1310,7 @@ export class StringsParser extends ParseHelper {
 		
 		// str = string, nst = nest, ref = reference, blk = block
 		this[ParseHelper.symbolNames] = [
-			'str', 'nst', 'ref', 'syx',
+			'str', 'nst', 'ref', 'syx', 'sys', 'syl',
 			're', 'evl', 'fnc', 'dom', 'amp', 'frk', 'ech', 'clc',
 			'backwards', 'every'
 		],
@@ -1325,20 +1337,15 @@ export class StringsParser extends ParseHelper {
 			{ name: s.nst, term: nest, callback: StringsParser.nest },
 			{ name: s.ref, term: ref, callback: StringsParser.reference },
 			{ name: s.syx, term: [ l, r ], callback: StringsParser.parse },
-			// sya = syntax assign
-			//{ name: 'sya', term: [ l, assignment, r ], callback: StringsParser.parse },
-			//{ name: 'syx', term: [ l, assignment, separator, r ], callback: StringsParser.parse },
-			//{
-			//	name: s._syx,
-			//	term: [ '[', /(?:=\s*?(?<assign>[a-zA-Z_$][\w$]*?))?\s*?(?:(?:;|\:)\s*?(?<option>.*?))?\s*?:/g, ']' ],
-			//	callback: Strings.parse
-			//},
 		];
 		
 		this.parameterPrecedence = [
-			{ name: s.str, term: str, esc: null },
-			{ name: s.nst, term: nest, esc: null },
-			{ name: s.syx, term: [ l, r ], esc: null },
+			{ name: s.str, term: str, esc: null, unmasks: true },
+			{ name: s.nst, term: nest, esc: null, unmasks: true },
+			{ name: s.syx, term: [ l, r ], esc: null, unmasks: true },
+			// sys = syntax short, syl = syntax long
+			{ name: s.sys, term: [ /^/g, assignment, /$/g ], esc: null },
+			{ name: s.syl, term: [ /^/g, assignment, separator, /$/g ], esc: null },
 		];
 		
 	}
@@ -1348,36 +1355,55 @@ export class StringsParser extends ParseHelper {
 	}
 	static parse(mask, masks, input, detail, self) {
 		
-		const	{ assign, assignment, suppressor } = StringsParser.syx;
+		const pm = this.paramMask.getMasks(mask.inners[0]).masks;
 		
-		if (!assignment.test(mask.inners[0], ...this.paramMask.getMasks(mask.inners[0]).masks)) return mask.$;
+		//hi(mask.$,pm);
+		//
+		//return;
+		//
+		//if (!assignment.test(mask.inners[0], ...pm)) return mask.$;
+		//
+		//const	[ statement, stuff ] = assignment.split(mask.inners[0].trim(), 1, ...pm),
+		//		suppresses = suppressor instanceof RegExp ? suppressor.test(splitted[2][0]) : splitted[2][0] === suppressor,
+		//		splittedStatement = statement.trimEnd().split(assign, 1),
+		//		descriptor = splittedStatement[0]?.trimEnd?.(),
+		//		label = splittedStatement?.[1]?.trimStart?.(),
+		//		body = cSeparator.split((stuff ?? '').trimStart(), 1, ...pm),
+		//		noOption = body.length === 1,
+		//		argsStr = (noOption ? body[0] : body[1]).trimStart(),
+		//		option = noOption ? undefined : body[0].trimEnd(),
+		//		args = argsStr && this.argMask.split(argsStr, undefined, StringsParser.syx.comma),
+		//		v = { descriptor, label, option, args };
+		//hi(descriptor, label,option, args);
+		////coco
+		//
+		//return suppresses ? { suppressed: v } : v;
 		
-		//coco
+		if (pm.length !== 1) return mask.$;
 		
-		return mask;
-		
-		const	splitted = mask.splitted,
+		const	{ assign, suppressor } = StringsParser.syx,
+				{ captor, splitted } = pm[0][0],
 				header = splitted[1].split(assign),
 				descriptor = header[0]?.trim?.(),
 				label = header?.[1]?.trim?.(),
 				suppresses = suppressor instanceof RegExp ? suppressor.test(splitted[2][0]) : splitted[2][0] === suppressor;
 		let i,l, option, args, v;
 		
-		switch (mask.captor) {
+		switch (captor) {
 			
-			case this.termOf('sya'):
+			case this.paramMask.termOf('sys'):
 			args = splitted[3];
 			break;
 			
-			case this.termOf('syx'):
+			case this.paramMask.termOf('syl'):
 			option = splitted[3].trim(), args = splitted[5];
 			break;
 			
 		}
 		
-		args &&= this.argMask.split(args.trim(), StringsParser.syx.comma),
+		args &&= this.argMask.split(args.trim(), undefined, StringsParser.syx.comma),
 		
-		v = { descriptor, label, option, args };
+		v = { descriptor, label, option, args, source: mask.$ };
 		
 		return suppresses ? { suppressed: v } : v;
 		
@@ -1391,7 +1417,7 @@ export class StringsParser extends ParseHelper {
 		
 		this.paramMask = new Terms({ precedence: StringsParser.parameterPrecedence, defaultThis: this, replacer: { [s.str]: [ ...this.termOf('str') ], [s.nst]: [ ...this.termOf('nst') ], [s.syx]: [ ...this.termOf('syx') ] } }),
 		
-		this.argMask = new Terms(this.termOf('str'), this.termOf('nst'), this.termOf('sya'), this.termOf('syx'));
+		this.argMask = new Terms(new Term(...this.termOf('str')), new Term(...this.termOf('nst')), new Term(...this.termOf('syx')));
 		
 	}
 	
@@ -1462,6 +1488,15 @@ export class StringsExpression extends ParseHelper {
 	
 	static descriptor = {
 		
+		nest(mask, masks, input, detail, self) {
+			
+			let v;
+			
+			(v = new String(mask.inners[0]))[StringsExpression.nests] = true;
+			
+			return v;
+			
+		},
 		call(mask, masks, input, detail, self) {
 			
 			// コメントの行は変更前の処理で、ネストする計算でエラーが起きていたが、
@@ -1477,7 +1512,7 @@ export class StringsExpression extends ParseHelper {
 		},
 		
 		string(mask, masks, input, detail, self) {
-			return mask.$;
+			return new String(mask.inners[0]);
 		},
 		
 		eval(mask, masks, input, detail, self) {
@@ -1554,9 +1589,12 @@ export class StringsExpression extends ParseHelper {
 	
 	static {
 		
+		this.syntaxError = Symbol('StringsExpression.syntaxError'),
+		this.nests = Symbol('StringsExpression.nests'),
+		
 		this.opsSymbolNames = [ 'nai', 'div', 'mul', 'sub', 'add' ],
 		this[ParseHelper.symbolNames] = [
-			'str', 'cll', 'evl', 'num', 'idt', 'ops', ...this.opsSymbolNames
+			'str', 'nst', 'cll', 'evl', 'num', 'idt', 'ops', ...this.opsSymbolNames
 		];
 		
 		const	s = ParseHelper.setSymbols(this),
@@ -1579,6 +1617,7 @@ export class StringsExpression extends ParseHelper {
 		
 		this[ParseHelper.precedenceDescriptors] = [
 			{ name: s.str, term: [ "'", "'" ], callback: StringsExpression.descriptor.string },
+			{ name: s.nst, term: [ '<', '>' ], callback: StringsExpression.descriptor.nest },
 			{ name: s.cll, term: [ '(', ')' ], callback: StringsExpression.descriptor.call },
 			{ name: s.evl, term: [ '`', '`' ], callback: StringsExpression.descriptor.eval },
 			{ name: s.num, term: [ /\d+(?:\.\d+)?/g ], callback: StringsExpression.descriptor.number },
@@ -1594,10 +1633,40 @@ export class StringsExpression extends ParseHelper {
 		
 	}
 	
+	[ParseHelper.main](block, parsed, plot, plotLength, input, detail, self) {
+		
+		if (typeof block === 'string') {
+			console.error(block, parsed, plot, input, new SyntaxError('Found an invalid argument.'));
+			return StringsExpression.syntaxError;
+		}
+		
+		block instanceof String && !(StringsExpression.nests in block) && (block += '');
+		
+		return block;
+		
+	}
+	
 	[ParseHelper.after](parsed, parsedLength, plot, plotLength, input, detail, self) {
 		
+		const { nests, syntaxError } = StringsExpression;
+		let i,p;
+		
+		if (parsed.indexOf(syntaxError) !== -1) return StringsExpression.syntaxError;
+		
+		i = -1;
+		while (++i < parsedLength) {
+			
+			if ((p = parsed[i])[nests])
+				return parsedLength === 1 ?	p :
+														(
+															console.error(new SyntaxError('Nesting value must be specified alone.')),
+															StringsExpression.syntaxError
+														);
+				
+		}
+		
 		const prcdc = StringsExpression.opsPrecedence, l = prcdc.length, splice = Array.prototype.splice;
-		let i,i0,li,ri, op,p,v, lp, spliceArgsLength;
+		let i0,li,ri, op,v, lp, spliceArgsLength;
 		
 		i = -1, lp = parsedLength - 1;
 		while (++i < l) {
@@ -1605,21 +1674,21 @@ export class StringsExpression extends ParseHelper {
 			i0 = -1, op = prcdc[i];
 			while (++i0 < parsedLength) {
 				
-				(p = parsed[i0]) === op.sym && (
-					
-					v = op.callback?.(
-							p,
-							(li = i0 > 0 ? i0 - 1 : null) === null ? li : parsed[li],
-							(ri = i0 === lp ? null : i0 + 1) === null? ri : parsed[ri],
-							i0, li, ri,
-							...arguments
-						),
-					Array.isArray(v) && (
-							splice.call(parsed, ...v),
-							i0 = (v[0] + (spliceArgsLength = v.slice(2).length)) - 1,
-							lp = (parsedLength -= v[1] - spliceArgsLength) - 1
-						)
-				);
+				if ((p = parsed[i0]) !== op.sym) continue;
+				
+				v = op.callback?.(
+						p,
+						(li = i0 > 0 ? i0 - 1 : null) === null ? li : parsed[li],
+						(ri = i0 === lp ? null : i0 + 1) === null? ri : parsed[ri],
+						i0, li, ri,
+						...arguments
+					),
+				
+				Array.isArray(v) && (
+						splice.call(parsed, ...v),
+						i0 = (v[0] + (spliceArgsLength = v.slice(2).length)) - 1,
+						lp = (parsedLength -= v[1] - spliceArgsLength) - 1
+					)
 				
 			}
 			
@@ -1650,12 +1719,12 @@ export class StringsDescriptor {
 	
 	get(parameter, assigned, property) {
 		
-		const	descriptor = this.descriptor[parameter.descriptor];
+		const	descriptor = this.descriptor[parameter.descriptor || 'I'];
 		let v;
 		
-		if (Array.isArray(descriptor) && descriptor[StringsDescriptor.reflects]) {
+		if (Array.isArray(descriptor) && descriptor[StringsDescriptor.reflects] && typeof descriptor[0] === 'function') {
 			
-			const l = descriptor.length, args = [];
+			const l = descriptor[0].length, args = [];
 			let i;
 			
 			i = -1;
@@ -1735,7 +1804,6 @@ export class StringsDescriptor {
 
 const strings = new Strings();
 export default strings.get.bind(strings);
-
 class Counter {
 	
 	static describe(from, to, value, pad, separator, parameter, assigned) {
@@ -1844,6 +1912,74 @@ class Reflector {
 	
 }
 strings.register([ '@', 'app' ], [ Reflector.describe, Reflector ]);
+
+class Inline {
+	
+	static describe(v) {
+		
+		return v ?? '';
+		
+	}
+	
+}
+strings.register([ 'I' ], [ Inline.describe, Inline ]);
+
+class Echo {
+	
+	//static describe(numbers, separator, strings) {
+	//	
+	//	const	args = this.or.split(inner, ...this.frkArgHierarchy.getMasks(inner).masks),
+	//			hasOpts = args.length > 1,
+	//			arg = hasOpts ? args[1] : args[0],
+	//			opts = hasOpts ? this.getArgs(args[0], detail, this.argHierarchy) : null,
+	//			l = opts?.[0] ?? 1,
+	//			separator = opts?.[1],
+	//			l0 = l - 1;
+	//	let i,ai, v, arg0, parser;
+	//	
+	//	i = ai = -1;
+	//	while (++i < l) {
+	//		arg0 = this.el.replace(this.eI.replace(this.ei.replace(arg, i), i + 1), l),
+	//		(v = (parser = this.getParser(arg0, detail)).next()).done ?
+	//			(splice[++ai] = v.value) : (ai = splice.push(...parser.next().value) - 1),
+	//		separator && i < l0 && (splice[++ai] = separator);
+	//	}
+	//	
+	//}
+	
+	static describe(numbers, separator, strings) {
+		
+		const	reflections = [ [ Echo.echo, Composer.$, [ numbers, separator, strings ] ] ];
+		
+		reflections[Composer.reflections] = true;
+		
+		return reflections;
+		
+	}
+	
+	static echo(numbers, separator, strings) {
+		
+		this.push(...strings), this[Composer.repetition] = numbers, this[Composer.separator] = separator;
+		
+	}
+	
+	//l = Number.isNaN(numbers = (numbers ?? 1)|0) ? 0 : numbers < 0 ? 0 : numbers,
+	//			separator = separator ?? '',
+	//			l0 = l - 1;
+	//	let i,ai, v, arg0, parser;
+	//	
+	//	i = ai = -1;
+	//	while (++i < l) {
+	//		arg0 = this.el.replace(this.eI.replace(this.ei.replace(arg, i), i + 1), l),
+	//		(v = (parser = this.getParser(arg0, detail)).next()).done ?
+	//			(splice[++ai] = v.value) : (ai = splice.push(...parser.next().value) - 1),
+	//		separator && i < l0 && (splice[++ai] = separator);
+	//	}
+	//	
+	//}
+	
+}
+strings.register([ '^', 'echo' ], [ Echo.describe, Echo ]);
 
 class Selector {
 	
@@ -2030,7 +2166,16 @@ export class Composer {
 		this.exec = Symbol('Composer.exec'),
 		this.reflections = Symbol('Composer.reflections'),
 		this.reflection = Symbol('Composer.reflection'),
-		this.each = Symbol('Composer.each');
+		this.each = Symbol('Composer.each'),
+		
+		this.suppressed = Symbol('Composer.suppressed'),
+		
+		this.rejectedPromise = Symbol('Composer.rejectedPromise'),
+		
+		this.valuesOptions = [
+			this.repetition = Symbol('Composer.repetition'),
+			this.separator = Symbol('Composer.separator'),
+		];
 		
 	}
 	
@@ -2082,134 +2227,134 @@ export class Composer {
 	// 第一引数 selector に指定した文字列を、document.querySelectorAll の第一引数にし、
 	// 選択されたすべての要素から、第二引数 propertyName に指定したプロパティの値を取得し、
 	// それを第三引数 values に指定した配列に追加する。
-	static select(urls, selector = ':root', propertyName = [ 'innerHTML' ], rxSrc, interval = -1, timeout = 30000, values = []) {
-		
-		if (urls) {
-			
-			Array.isArray(urls) || (urls = [ urls ]);
-			
-			const	URLs = [], l = urls.length, current = location.origin + location.pathname,
-					awaits = (interval = interval|0) > -1;
-			let i;
-			
-			i = -1;
-			while (++i < l) {
-				
-				// 引数 intervals が有効で、かつ urls の数が多い時、恐らくすさまじい数の Promise のネストが発生するだろう。
-				// await を使えばいいかもしれないが、Strings.prototype.get を非同期関数にすることによって生じる影響を検討する気になれない。
-				
-				values[i] = awaits > -1 && i ? 
-					values[i - 1].then((url => () => new Promise(rs => setTimeout(() => Composer.promiseRemoteSelector(url, current, selector, propertyName, rxSrc, timeout).catch(error => error).then(v => rs(v)), interval)))(urls[i])) :
-					Composer.promiseRemoteSelector(urls[i], current, selector, propertyName, rxSrc, timeout);
-				
-			}
-			
-			return values;
-			
-		} else {
-			
-			return Composer.getNodesValue(document.querySelectorAll(selector), propertyName, rxSrc, values);
-			
-		}
-		
-	}
-	static promiseRemoteSelector(url, current, selector, propertyName, rxSrc, timeout, values = []) {
-		
-		const ac = new AbortController();
-		
-		console.info('[Strings]', 'LOAD', url);
-		
-		return new Promise((rs, rj) => {
-				const ac = new AbortController();
-				fetch(new URL(url, current)+'', { signal: ac.signal }).
-					then(response => rs(response)).catch(error => rj(error)),
-				timeout && setTimeout(() => (ac.abort(), rj(Error('timeouted'))), timeout);
-			}).
-				then(response => response.text()).catch(error => error).
-					then(v => v instanceof Error ? v : Composer.remoteSelector(v, selector, propertyName, rxSrc, values));
-		
-	}
-	static remoteSelector(html, selector, propertyName, rxSrc, values) {
-		
-		let resolver;
-		const iframe = document.createElement('iframe'),
-				// https://developer.mozilla.org/ja/docs/Web/API/crypto_property
-				signature = crypto.getRandomValues(new Uint32Array(1)).join(),
-				messenger = `<script>
-						const	loaded = event => {
-												removeEventListener('message', loaded),
-												postMessage(
-													{
-														signature: '${signature}',
-														values:	(${Composer.getNodesValue.toString().replace(new RegExp(`^${Composer.getNodesValue.name}`), 'function')})
-																		(document.querySelectorAll('${selector}'), ${JSON.stringify(propertyName)}, ${JSON.stringify(rxSrc || null)})
-													},
-													'${location.origin}'
-												)
-											};
-						addEventListener('DOMContentLoaded', loaded);
-					</script>`,
-				promise = new Promise (rs => resolver = rs),
-				received = message => message.data?.signature === signature && (
-						iframe.contentWindow.removeEventListener('message', received),
-						iframe.remove(),
-						values.push(...message.data.values),
-						resolver(values)
-					),
-				loaded = event => (
-						iframe.removeEventListener(event.type, loaded),
-						iframe.contentWindow.addEventListener('message', received)
-					);
-		
-		iframe.addEventListener('load', loaded),
-		iframe.srcdoc = html + messenger,
-		document.body.appendChild(iframe);
-		
-		return promise;
-		
-	}
-	static getNodesValue(nodes = [], propertyName = [ 'innerHTML' ], rxSrc, values = []) {
-		
-		const	l = nodes.length,
-				requiresAttr = typeof propertyName === 'string',
-				pl = propertyName?.length,
-				rx = rxSrc && new RegExp(rxSrc);
-		let i,i0, vl, v;
-		
-		if (!l || !(requiresAttr || pl)) return values;
-		
-		i = -1, vl = values.length - 1;
-		
-		if (requiresAttr) {
-			
-			while (++i < l) values[++vl] = nodes[i].getAttribute(propertyName) || '';
-			
-		} else if (propertyName[0] === 'style') {
-			
-			while (++i < l) values[++vl] = nodes[i].style.getPropertyValue(propertyName?.[1]) || '';
-		
-		} else {
-		
-			while (++i < l) {
-				
-				i0 = -1, v = nodes[i];
-				while (++i0 < pl && (v = v[propertyName[i0]]) && typeof v === 'object');
-				values[++vl] = v;
-				
-			}
-			
-		}
-		
-		if (rx) {
-			
-			i = -1, vl = values.length;
-			while (++i < vl) values[i] = rx.exec(values[i])?.[0] || '';
-			
-		}
-		
-		return values;
-		
-	}
+	//static select(urls, selector = ':root', propertyName = [ 'innerHTML' ], rxSrc, interval = -1, timeout = 30000, values = []) {
+	//	
+	//	if (urls) {
+	//		
+	//		Array.isArray(urls) || (urls = [ urls ]);
+	//		
+	//		const	URLs = [], l = urls.length, current = location.origin + location.pathname,
+	//				awaits = (interval = interval|0) > -1;
+	//		let i;
+	//		
+	//		i = -1;
+	//		while (++i < l) {
+	//			
+	//			// 引数 intervals が有効で、かつ urls の数が多い時、恐らくすさまじい数の Promise のネストが発生するだろう。
+	//			// await を使えばいいかもしれないが、Strings.prototype.get を非同期関数にすることによって生じる影響を検討する気になれない。
+	//			
+	//			values[i] = awaits > -1 && i ? 
+	//				values[i - 1].then((url => () => new Promise(rs => setTimeout(() => Composer.promiseRemoteSelector(url, current, selector, propertyName, rxSrc, timeout).catch(error => error).then(v => rs(v)), interval)))(urls[i])) :
+	//				Composer.promiseRemoteSelector(urls[i], current, selector, propertyName, rxSrc, timeout);
+	//			
+	//		}
+	//		
+	//		return values;
+	//		
+	//	} else {
+	//		
+	//		return Composer.getNodesValue(document.querySelectorAll(selector), propertyName, rxSrc, values);
+	//		
+	//	}
+	//	
+	//}
+	//static promiseRemoteSelector(url, current, selector, propertyName, rxSrc, timeout, values = []) {
+	//	
+	//	const ac = new AbortController();
+	//	
+	//	console.info('[Strings]', 'LOAD', url);
+	//	
+	//	return new Promise((rs, rj) => {
+	//			const ac = new AbortController();
+	//			fetch(new URL(url, current)+'', { signal: ac.signal }).
+	//				then(response => rs(response)).catch(error => rj(error)),
+	//			timeout && setTimeout(() => (ac.abort(), rj(Error('timeouted'))), timeout);
+	//		}).
+	//			then(response => response.text()).catch(error => error).
+	//				then(v => v instanceof Error ? v : Composer.remoteSelector(v, selector, propertyName, rxSrc, values));
+	//	
+	//}
+	//static remoteSelector(html, selector, propertyName, rxSrc, values) {
+	//	
+	//	let resolver;
+	//	const iframe = document.createElement('iframe'),
+	//			// https://developer.mozilla.org/ja/docs/Web/API/crypto_property
+	//			signature = crypto.getRandomValues(new Uint32Array(1)).join(),
+	//			messenger = `<script>
+	//					const	loaded = event => {
+	//											removeEventListener('message', loaded),
+	//											postMessage(
+	//												{
+	//													signature: '${signature}',
+	//													values:	(${Composer.getNodesValue.toString().replace(new RegExp(`^${Composer.getNodesValue.name}`), 'function')})
+	//																	(document.querySelectorAll('${selector}'), ${JSON.stringify(propertyName)}, ${JSON.stringify(rxSrc || null)})
+	//												},
+	//												'${location.origin}'
+	//											)
+	//										};
+	//					addEventListener('DOMContentLoaded', loaded);
+	//				</script>`,
+	//			promise = new Promise (rs => resolver = rs),
+	//			received = message => message.data?.signature === signature && (
+	//					iframe.contentWindow.removeEventListener('message', received),
+	//					iframe.remove(),
+	//					values.push(...message.data.values),
+	//					resolver(values)
+	//				),
+	//			loaded = event => (
+	//					iframe.removeEventListener(event.type, loaded),
+	//					iframe.contentWindow.addEventListener('message', received)
+	//				);
+	//	
+	//	iframe.addEventListener('load', loaded),
+	//	iframe.srcdoc = html + messenger,
+	//	document.body.appendChild(iframe);
+	//	
+	//	return promise;
+	//	
+	//}
+	//static getNodesValue(nodes = [], propertyName = [ 'innerHTML' ], rxSrc, values = []) {
+	//	
+	//	const	l = nodes.length,
+	//			requiresAttr = typeof propertyName === 'string',
+	//			pl = propertyName?.length,
+	//			rx = rxSrc && new RegExp(rxSrc);
+	//	let i,i0, vl, v;
+	//	
+	//	if (!l || !(requiresAttr || pl)) return values;
+	//	
+	//	i = -1, vl = values.length - 1;
+	//	
+	//	if (requiresAttr) {
+	//		
+	//		while (++i < l) values[++vl] = nodes[i].getAttribute(propertyName) || '';
+	//		
+	//	} else if (propertyName[0] === 'style') {
+	//		
+	//		while (++i < l) values[++vl] = nodes[i].style.getPropertyValue(propertyName?.[1]) || '';
+	//	
+	//	} else {
+	//	
+	//		while (++i < l) {
+	//			
+	//			i0 = -1, v = nodes[i];
+	//			while (++i0 < pl && (v = v[propertyName[i0]]) && typeof v === 'object');
+	//			values[++vl] = v;
+	//			
+	//		}
+	//		
+	//	}
+	//	
+	//	if (rx) {
+	//		
+	//		i = -1, vl = values.length;
+	//		while (++i < vl) values[i] = rx.exec(values[i])?.[0] || '';
+	//		
+	//	}
+	//	
+	//	return values;
+	//	
+	//}
 	
 	// 第一引数 targets に指定された要素を第二引数 values の対応する位置の要素と結合する。
 	// targets の要素数が values よりも多い場合（これはこの関数が想定している唯一の状況だが）、
@@ -2285,7 +2430,7 @@ export class Composer {
 		
 		const constructor = source.constructor;
 		
-		if (constructor !== Array || constructor !== Object) return source;
+		if (constructor !== Array && constructor !== Object) return source;
 		
 		const keys = Object.keys(source), l = keys.length, replaced = constructor === Array ? [] : {};
 		let i,k,s;
@@ -2294,30 +2439,41 @@ export class Composer {
 		while (++i < l)
 			replaced[k = keys[i]] = (s = source[k]) === target ? value : Composer.replaceValue(s, target, value);
 		
-		return source;
+		return replaced;
 		
 	}
 	static *getComposer(parts) {
 		
-		let i,i0,l0,i1,l1,pi,pl, p, nodes,propertyName, composed, suppresses, source, resolver, every,backwards;
+		let	i,i0,l0,i1,l1,pi,pl,
+				p, nodes,propertyName, composed, suppresses, source, resolver, every,backwards, compose, values;
 		const	l = (Array.isArray(parts) ? parts : (parts = [ parts ])).length, URLs = [],
-				values = [], snapshots = [], sources = [],
-				errored = Symbol(),
+				snapshots = [], sources = [],
+				{ rejectedPromise } = this,
 				promise = new Promise(rs => resolver = rs),
 				promised = (v, promise, snapshot, source) => {
 					
 					const i = snapshot.indexOf(promise);
 					
 					i === -1 || (
-						v === errored ?	(snapshot.splice(i, 1), source && source.splice(i, 1)) :
-												(snapshot[i] = v, source && (source[i] = v))
+						v === rejectedPromise ?	(snapshot.splice(i, 1), source && source.splice(i, 1)) :
+														(snapshot[i] = v, source && (source[i] = v))
 					),
-					++pi === pl && (snapshot.flat(1), source && source.flat(1), resolver());
+					++pi === pl && (
+							v = snapshot.flat(1), snapshot.length = 0, snapshot.push(...v),
+							source && (v = source.flat(1), source.length = 0, source.push(...v)),
+							resolver()
+						);
 					
-				};
+				},
+				{ repetition, separator, valuesOptions } = Composer,
+				vol = valuesOptions.length,
+				numIsNaN = Number.isNaN,
+				max = Math.max;
 		
 		i = -1, pi = pl = 0, composed = [];
 		while (++i < l) {
+			
+			values ||= [];
 			
 			switch (typeof (p = parts[i])) {
 				
@@ -2350,10 +2506,9 @@ export class Composer {
 						if (p.v[i][Composer.each]) {
 							
 							i1 = -1, l1 = values.length;
-							while (++i1 < l1)
-								Composer.replaceValue(p.v[i], Composer.$, values[i]), values[i] = Reflect.apply(...p.v[i]);
+							while (++i1 < l1) values[i] = Reflect.apply(...Composer.replaceValue(p.v[i], Composer.$, values[i]));
 							
-						} else Composer.replaceValue(p.v[i], Composer.$, values), Reflect.apply(...p.v[i]);
+						} else Reflect.apply(...Composer.replaceValue(p.v[i], Composer.$, values));
 						
 					}
 					
@@ -2380,15 +2535,15 @@ export class Composer {
 				
 			}
 			
-			snapshots[i] = [ ...(suppresses ? values : (sources[i] = [ ...values ])) ],
+			snapshots[i] = suppresses ? values : [ ...(sources[i] = values) ];
 			
 			i0 = -1, l0 = values.length;
 			while (++i0 < l0) values[i0] instanceof Promise && (
 					++pl,
-					values[i0].then(v => v).catch(error => (console.error(error), errored)).then(((promise, ss, src) => v => promised(v, promise, ss, src))(values[i0], snapshots[i], sources[i]))
+					values[i0].then(v => v).catch(error => (console.error(error), rejectedPromise)).then(((promise, ss, src) => v => promised(v, promise, ss, src))(values[i0], snapshots[i], sources[i]))
 				);
 			
-			values.length = 0, suppresses = null;
+			values = suppresses = null;
 			
 		}
 		
@@ -2401,16 +2556,25 @@ export class Composer {
 			
 			if (typeof (source = sources[i]) === 'number') {
 				
-				if (!Array.isArray(source = snapshots[(every = (source = source|0) < 0) ? source * -1 : source])) continue;
+				if (!Array.isArray(values = snapshots[(every = (source = source|0) < 0) ? source * -1 : source])) continue;
 				
-				every || (source = [ ...source ]);
+				if (!every) {
+					
+					i0 = -1, source = [ ...values ];
+					while (++i0 < vol) values.hasOwnProperty(i0 = valuesOptions[i0]) && (source[i0] = values[i0]);
+					
+				}
 				
 			} else if (parts[i] && typeof parts[i] === 'object') {
-				backwards = parts[i][Strings.sym.backwards],
-				every = parts[i][Strings.sym.every];
+				
+				backwards = parts[i].backwards,
+				every = parts[i].every;
+				
 			}
 			
-			composed = Composer[backwards ? 'everyReverse' : every ? 'every' : 'mix'](composed, source);
+			i0 = -1, l0 = repetition in source ? numIsNaN(l0 = +source[repetition]|0) ? 1 : max(l0, 0) : 1,
+			compose = Composer[backwards ? 'everyReverse' : every ? 'every' : 'mix'];
+			while (++i0 < l0) composed = compose(composed, source, i0 ? source?.[separator] ?? '' : '');
 			
 		}
 		
@@ -2419,20 +2583,20 @@ export class Composer {
 	}
 	
 	// 第一引数 strs に指定された配列内の各要素に、第二引数 values に指定された配列内の要素を合成する。
-	static mix(strs, values, container = []) {
+	static mix(strs, values, separator = '', container = []) {
 		
 		const l = (Array.isArray(strs) ? strs.length ? strs : (strs[0] = '', strs) : (strs = [ '' ])).length;
 		let i;
 		
 		i = -1;
-		while (++i < l) Composer.generate(strs[i], values, container);
+		while (++i < l) Composer.generate(strs[i], values, separator, container);
 		
 		return container;
 		
 	}
 	
 	// 第一引数 str に指定された文字列に、第二引数 values に指定された配列内の要素をすべて合成する。
-	static generate(str, values, container = []) {
+	static generate(str, values, separator, container = []) {
 		
 		const l = (Array.isArray(values) ? values : (values = [ values ])).length;
 		let i, i0 = (Array.isArray(container) ? container : (container = [])).length - 1;
@@ -2440,7 +2604,7 @@ export class Composer {
 		if (l) {
 			
 			i = -1;
-			while (++i < l) container[++i0] = str + values[i];
+			while (++i < l) container[++i0] = str + separator + values[i];
 			
 		} else container[++i0] = str;
 		
