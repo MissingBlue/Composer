@@ -1356,7 +1356,7 @@ export class Strings {
 			p.v = this.desc.get(p, assigned);
 			
 		}
-		hi(parameters);
+		//hi(parameters);
 		const composed = Composer.compose(parameters), cl = composed.length;
 		
 		//coco
@@ -1474,7 +1474,6 @@ export class StringsParser extends ParseHelper {
 				descriptor = header[0]?.trim?.(),
 				label = header?.[1]?.trim?.(),
 				suppresses = suppressor instanceof RegExp ? suppressor.test(splitted[2][0]) : splitted[2][0] === suppressor,
-				argMask = this.argMask,
 				{ optionName, syntaxError } = StringsParser;
 		let i,l, options,opt, args, v;
 		
@@ -1490,28 +1489,6 @@ export class StringsParser extends ParseHelper {
 			
 		}
 		
-		//if (options &&= this.optMask.plot(options, detail)) {
-		//	
-		//	i = -1, l = options.length;
-		//	while (++i < l) {
-		//		
-		//		typeof (opt = options[i]) === 'string' ?
-		//			(options.splice(i,1, ...(opt = opt.trim().split(' '))), i += opt.length - 1, l += opt.length - 1) :
-		//			(
-		//				i && typeof options[i - 1] === 'string' ?
-		//					(
-		//						options[i] = opt = argMask.split(opt.inners[0].trim(), undefined, comma),
-		//						opt[optionName] = options.splice(--i, 1)[0], --l
-		//					) :
-		//					syntaxError
-		//			);
-		//		
-		//	}
-		//	
-		//}
-		//
-		//args &&= argMask.split(args.trim(), undefined, comma),
-		
 		v = { descriptor, label, options, args, source: mask.$ };
 		
 		return suppresses ? { suppressed: v } : v;
@@ -1522,13 +1499,9 @@ export class StringsParser extends ParseHelper {
 		
 		super(configuration, StringsParser);
 		
-		const s = StringsParser.symbol;
+		const s = StringsParser[ParseHelper.symbol];
 		
-		this.paramMask = new Terms({ precedence: StringsParser.parameterPrecedence, defaultThis: this, replacer: { [s.str]: [ ...this.termOf('str') ], [s.nst]: [ ...this.termOf('nst') ], [s.syx]: [ ...this.termOf('syx') ] } }),
-		
-		//this.optMask = new Term(/[$A-Za-z_\u0080-\uFFFF][$\w\u0080-\uFFFF]*[\s\t]*\(/g, ')'),
-		//this.optMask = new Term(...this.termOf('arg')),
-		this.argMask = new Terms(new Term(...this.termOf('str')), new Term(...this.termOf('nst')), new Term(...this.termOf('syx')));
+		this.paramMask = new Terms({ precedence: StringsParser.parameterPrecedence, defaultThis: this, replacer: { [s.str]: [ ...this.termOf('str') ], [s.nst]: [ ...this.termOf('nst') ], [s.syx]: [ ...this.termOf('syx') ] } });
 		
 	}
 	
@@ -1540,13 +1513,6 @@ export class StringsParser extends ParseHelper {
 		return ParseHelper.passthrough;
 		
 	}
-	//[ParseHelper.before](plot, plotLength, input, detail, self) {
-	//	
-	//	detail.v ||= {}, detail.addr ||= [];
-	//	
-	//	return ParseHelper.passthrough;
-	//	
-	//}
 	[ParseHelper.main](block, parsed, plot, plotLength, input, detail, self) {
 		
 		const index = detail[StringsParser.assignedIndex], l = index.length, k = block?.label;
@@ -1581,28 +1547,6 @@ export class StringsParser extends ParseHelper {
 
 export class StringsExpression extends ParseHelper {
 	
-	static {
-		
-		this.nests = Symbol('StringsExpression.nests'),
-		this.isGroup = Symbol('StringsExpression.isGroup'),
-		this.identifies = Symbol('StringsExpression.identifies'),
-		
-		this[ParseHelper.symbolNames] = [ 'spc', 'str', 'evl', 'nst', 'cll', 'idt', 'cmm' ];
-		
-		const	s = ParseHelper.setSymbols(this);
-		
-		this[ParseHelper.precedenceDescriptors] = [
-			{ name: s.str, term: [ "'", "'" ], esc: null, unmasks: true },
-			{ name: s.evl, term: [ '`', '`' ], esc: null, callback: StringsExpression.eval },
-			{ name: s.nst, term: [ '<', '>' ], esc: null, callback: StringsExpression.nest },
-			{ name: s.cll, term: [ '(', ')' ], esc: null, callback: StringsExpression.call },
-			{ name: s.idt, term: [ /[$A-Za-z_\u0080-\uFFFF][$\w\u0080-\uFFFF]*/g ], callback: StringsExpression.identify },
-			{ name: s.cmm, term: [ ',' ], esc: null, callback: StringsExpression.comma },
-			{ name: s.spc, term: [ /[\n\s\t]+/g ], callback: StringsExpression.space }
-		];
-		
-	}
-	
 	static eval(mask, masks, input, detail, self) {
 		
 		return (new Function('assigned', mask.inners[0]))(detail);
@@ -1617,7 +1561,6 @@ export class StringsExpression extends ParseHelper {
 		return v;
 		
 	}
-	//todo StringsExpression での関数構文サポート
 	static call(mask, masks, input, detail, self) {
 		
 		// コメントの行は変更前の処理で、ネストする計算でエラーが起きていたが、
@@ -1629,7 +1572,9 @@ export class StringsExpression extends ParseHelper {
 		//const v = StringExpression.stringify(this.get(mask.inners[0], detail));
 		//v[StringExpression.isGroup] = true;
 		
-		return this.get(mask.inners[0], detail);
+		const v = this.get(mask.inners[0], detail);
+		
+		return v;
 		
 		//return mask;
 		
@@ -1686,14 +1631,36 @@ export class StringsExpression extends ParseHelper {
 		
 	}
 	
+	static {
+		
+		this.nests = Symbol('StringsExpression.nests'),
+		this.isGroup = Symbol('StringsExpression.isGroup'),
+		this.identifies = Symbol('StringsExpression.identifies'),
+		
+		this[ParseHelper.symbolNames] = [ 'spc', 'str', 'evl', 'nst', 'cll', 'idt', 'cmm' ];
+		
+		const	s = ParseHelper.setSymbols(this);
+		
+		this[ParseHelper.precedenceDescriptors] = [
+			{ name: s.str, term: [ "'", "'" ], esc: null, unmasks: true },
+			{ name: s.evl, term: [ '`', '`' ], esc: null, callback: StringsExpression.eval },
+			{ name: s.nst, term: [ '<', '>' ], esc: null, callback: StringsExpression.nest },
+			{ name: s.cll, term: [ '(', ')' ], esc: null, callback: StringsExpression.call },
+			{ name: s.idt, term: [ /[$A-Za-z_\u0080-\uFFFF][$\w\u0080-\uFFFF]*/g ], callback: StringsExpression.identify },
+			{ name: s.cmm, term: [ ',' ], esc: null, callback: StringsExpression.comma },
+			{ name: s.spc, term: [ /[\n\s\t]+/g ], callback: StringsExpression.space }
+		];
+		
+	}
+	
 	constructor(configuration, core) {
 		
-		const s = StringsExpression.symbol;
+		super(configuration, StringsExpression);
 		
-		super(configuration, StringsExpression),
+		const ecs = StringsExpressionCore[ParseHelper.symbol];
 		
 		this.core = core instanceof StringsExpressionCore ? core :
-			new StringsExpressionCore({ replacer: { [ s.str ]: [ ...this.termOf('str') ] } });
+			new StringsExpressionCore({ replacer: { [ ecs.str ]: [ ...this.termOf('str') ] } });
 		
 	}
 	
@@ -1704,43 +1671,65 @@ export class StringsExpression extends ParseHelper {
 				console.error(block, parsed, plot, input, new SyntaxError('Found an invalid argument.')),
 				ParseHelper.syntaxError
 			) :
-			(
-				block instanceof String &&
-					!(StringsExpression.nests in block || StringsExpression.identifies in block) && (block += ''),
-				block
-			);
+			block;
 		
 	}
 	
 	[ParseHelper.after](parsed, parsedLength, plot, plotLength, input, detail, self) {
 		
 		const	core = this.core, comma = this.symOf('cmm'), values = [],
-				{ identifies, stringify } = StringsExpression,
+				{ identifies, nests, stringify } = StringsExpression,
 				syntaxError = ParseHelper.syntaxError;
-		let i,vi, p,p0,pl0, beginIndex;
+		let i,i0,l0,vi, p,p0,pl0, beginIndex, v;
 		
 		i = vi = -1, beginIndex = 0, pl0 = parsedLength - 1;
 		while (++i < parsedLength && (p = parsed[i]) !== syntaxError) {
 			
-			p === comma || i === pl0 ?
-				(
-					((values[++vi] = core.get(parsed.slice(beginIndex, i === pl0 ? i + 1 : i).join(''))) === syntaxError) ?
-						(i = parsedLength) :
-						(beginIndex = i + 1)
-				) :
-				p instanceof String && p[identifies] ? (
-					typeof (p = detail?.[p]) === 'function' && (p0 = parsed[i + 1]) && typeof p0 === 'object' ?
-						(
-							(p = p(...p0)) === syntaxError ?
-								(i = parsedLength) :
-								(parsed.splice(i--, 2, stringify(p)), pl0 = --parsedLength - 1)
-						) :
-						((p = stringify(p)) === syntaxError && (i = parsedLength))
-				) :
-					Array.isArray(p) ?
-						(parsed[i] = stringify(p[0])) :
-						p && typeof p === 'object' &&
-							(p = this.get(p0.inners[0], detail), parsed[i] = p[p.length && p.length - 1]);
+			if (p instanceof String) {
+				
+				if (p[identifies]) {
+					
+					if (typeof (p = detail?.[p]) === 'function' && Array.isArray(p0 = parsed[i + 1])) {
+						
+						if ((p = p(...p0)) === syntaxError) break;
+						
+						parsed.splice(i--, 2, stringify(p)), pl0 = --parsedLength - 1;
+							
+					} else if ((parsed[i] = stringify(p)) === syntaxError) break;
+					
+				} else parsed[i] = p;
+				
+			} else if (Array.isArray(p)) {
+				
+				parsed[i] = stringify(p.length ? p[p.length - 1] : '');
+				
+			}
+			//else if (p && typeof p === 'object') {
+			//	
+			//	parsed[i] = stringify((p = this.get(p.inners[0], detail)).length ? p[p.length - 1] : '');
+			//	
+			//} else break;
+			
+			if (p === comma || i === pl0) {
+				
+				if (
+					(l0 = (v = parsed.slice(beginIndex, i === pl0 ? i + 1 : i)).length) === 1 &&
+					(typeof v[0] !== 'string' || v[0][nests])
+				) {
+					
+					v = v[0];
+					
+				} else {
+					
+					i0 = -1;
+					while (++i0 < l0 && typeof v[i0] === 'string' && !v[i0][nests]);
+					if (i0 < l0 || (v = core.get(v.join(''))) === syntaxError) break;
+					
+				}
+				
+				values[++vi] = v, beginIndex = i + 1;
+				
+			}
 			
 		}
 		
