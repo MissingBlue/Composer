@@ -194,7 +194,7 @@ export class Sequence extends Unit {
 	}
 	replace(str, replacer = '') {
 		
-		const matched = this.index(str, true).matched, l = matched.length, u = this.unit;
+		const matched = this.index(str, true)[Indexer.indexed], l = matched.length, u = this.unit;
 		let i,m,lm, replaced;
 		
 		i = -1, replaced = '';
@@ -365,7 +365,8 @@ export class Chr extends Unit {
 		
 		return new Chr(
 				{ pattern: unit.source, flags: unit.flags, unescapes: true },
-				{ pattern: seq.source, flags: seq.flags, repetition: seq.repetition, unescapes: true },
+				seq instanceof Sequence ?
+					{ pattern: seq.source, flags: seq.flags, repetition: seq.repetition, unescapes: true } : null,
 				matchesEmpty
 			);
 		
@@ -409,6 +410,7 @@ export class Term extends Array {
 		this.callback = Symbol('Term.callback'),
 		this.deletes = Symbol('Term.deletes'),
 		this.splices = Symbol('Term.splices'),
+		this.clones = Symbol('Term.clones'),
 		
 		this.escSeq = '\\';
 		
@@ -722,6 +724,30 @@ export class Term extends Array {
 		
 	}
 	
+	getEscs() {
+		
+		const l = this.length, escs = new Set();
+		let i, esc;
+		
+		i = -1;
+		while (++i < l) (esc = this.chr(i)?.seq) instanceof Sequence && escs.add(esc);
+		
+		return escs;
+		
+	}
+	clone(escSeq = this.escSeq, callback, thisArg) {
+		
+		const l = this.length, clone = new Term(), hasCallback = typeof callback === 'function', cb = Term.callback;
+		let i, source, chr;
+		
+		i = -1, clone.setDefaultEscSeq(escSeq);
+		while (++i < l)	clone[i] = chr = (source = this.chr(i)).clone(),
+								callback && chr.setCallback(hasCallback ? callback : source[cb], thisArg);
+		
+		return clone;
+		
+	}
+	
 }
 
 // Array を継承し、Term を要素に持つ。
@@ -734,7 +760,7 @@ export class Terms extends Array {
 	static unmasks = Symbol('Terms.unmasks');
 	static callback = Symbol('Terms.callback');
 	static deletes = Symbol('Terms.deletes');
-	static splices = Symbol('Terms.deletes');
+	static splices = Symbol('Terms.splices');
 	
 	// 内部処理用の関数で、第二引数 source に与えられた配列の中から、第一引数 v に一致する要素の位置を再帰して取得する。
 	// 戻り値は一致した v を列挙する配列で、その配列の、シンボル Terms.termIndex が示すプロパティに v の位置が指定される。
@@ -808,8 +834,8 @@ export class Terms extends Array {
 		
 		Array.isArray(precedenceDescriptors) || (precedenceDescriptors = [ precedenceDescriptors ]);
 		
-		const l = precedenceDescriptors.length;
-		let i,ti,v, pd, term, callback, sym;
+		const l = precedenceDescriptors.length, clones = replacer?.[Term.clones];
+		let i,ti, pd, term,replaces, callback, sym;
 		
 		i = -1, ti = this.length - 1,
 		esc = esc instanceof Sequence ? esc : typeof esc === 'string' ? new Sequence(esc) : null,
@@ -825,8 +851,8 @@ export class Terms extends Array {
 			} else if (pd && typeof pd === 'object') {
 				
 				term = this[++ti] = this[typeof pd.name === 'symbol' ? pd.name : Symbol(pd.name)] =
-					(term = replacer && pd.name in replacer ? replacer[pd.name] : pd.term) instanceof Term ?
-						term : new Term(term, 'esc' in pd ? pd.esc : esc),
+					(term = replacer && (replaces = pd.name in replacer) ? replacer[pd.name] : pd.term) instanceof Term ?
+						replaces && clones ? term.clone() : term : new Term(term, 'esc' in pd ? pd.esc : esc),
 				
 				(callback = pd.callback) && term.setCallback(callback, this),
 				//(callback = pd.callback) && (
@@ -1003,31 +1029,20 @@ export class Terms extends Array {
 		return (str += '') ? Term.plot(str, detail, this, ...this.getMasks(str).masks, ...additionalMasks) : [ str ];
 		
 	}
-	_plot(str, detail, ...additionalMasks) {
+	
+	getEscs() {
 		
-		if (!(str += '')) return [ str ];
+		const l = this.length, escs = new Set();
+		let i,v, term,escs0;
 		
-		const masks = [ ...this.getMasks(str).masks, ...additionalMasks ].flat(1), ml = masks.length;
+		i = -1;
+		while (++i < l)	if (
+									escs0 =	(term = this[i]).constructor === Array ? this.getEscs.apply(term) :
+												term instanceof Terms ? term.getEscs() :
+										 		term instanceof Term && term.getEscs()
+								) for (v of escs0) escs.add(v);
 		
-		if (!ml) return [ str ];
-		
-		const sl = str.length, result = [], { max, min } = Math, { callback, deletes, splices } = Term;
-		let i,i0,l0,v, datum, mask,sub,cursor;
-		
-		i = i0 = -1, cursor = 0, masks.sort(Term.sortLoc);
-		while (++i < ml) {
-			cursor <= (mask = masks[i]).lo && (
-				(sub = str.substring(cursor, max(mask.lo, 0))) && (result[++i0] = sub),
-				cursor = mask.ro,
-				(v = typeof (v = mask.captor[callback]) === 'function' ? v(mask, masks, str, detail, this) : mask) === deletes ||
-					(Array.isArray(v) && v[splices] ? v.length && (i0 = result.push(...v) - 1) : (result[++i0] = v))
-			);
-			if (min(mask.ro, sl) === sl) break;
-		}
-		
-		cursor <= sl - 1 && (result[++i0] = str.substring(cursor));
-		
-		return result;
+		return escs;
 		
 	}
 	
@@ -1136,6 +1151,7 @@ export class ParseHelper extends Terms {
 	//}
 	static {
 		
+		this.escOwners = Symbol('ParseHelper.escOwners'),
 		this.syntaxError = Symbol('ParseHelper.syntaxError');
 		
 		const	symbols = [
@@ -1152,7 +1168,9 @@ export class ParseHelper extends Terms {
 					'esc',
 					'symbolNames',
 					'symbol',
-					'hierarchy'
+					'hierarchy',
+					
+					'isPrecedence'
 					
 				],
 				l = symbols.length;
@@ -1254,6 +1272,23 @@ export class ParseHelper extends Terms {
 		
 	}
 	
+	fetchEscs() {
+		
+		const owners = this[ParseHelper.escOwners] || [], l = owners.length + 1, escs = new Set();
+		let i,v,o;
+		
+		i = -1, owners[l - 1] = this;
+		while (++i < l) {
+			if ((o = owners[i]) instanceof Chr) o.seq instanceof Sequence && escs.add(o.seq);
+			else if (o !== this && o instanceof ParseHelper) for (v of o.fetchEscs()) escs.add(v);
+			else if (o instanceof Terms) for (v of o.getEscs()) escs.add(v);
+			else if (o instanceof Term) for (v of o.getEscs()) escs.add(v);
+		}
+		
+		return escs;
+		
+	}
+	
 }
 
 export class Strings {
@@ -1281,8 +1316,14 @@ export class Strings {
 		
 		const	es = StringsExpression[ParseHelper.symbol];
 		
-		this.exp = exp instanceof StringsExpression ?
-			exp : new StringsExpression({ replacer: { [es.str]: sp.termOf('str'), [es.nst]: sp.termOf('nst'),  } }),
+		this.exp = exp instanceof StringsExpression ?	exp :
+																		new StringsExpression({
+																			replacer: {
+																				[Term.clones]: true,
+																				[es.str]: sp.termOf('str'),
+																				[es.nst]: sp.termOf('nst')
+																			}
+																		}),
 		
 		this.optionsSeparator = new Chr(/[\s\t]+/g),
 		this.optionsMasks = this.exp[es.cll],
@@ -1299,14 +1340,20 @@ export class Strings {
 		(assigned && typeof assigned === 'object') || (assigned = { [Strings.anonAssignKey]: assigned });
 		
 		const	parameters = this.sp.get(str, assigned), pl = parameters.length, esc = this.sp.esc,
+				spNests = StringsParser.nests,
 				{ nests } = StringsExpression,
 				syntaxError = ParseHelper.syntaxError;
-		let i,i0,l0,k, p, opts,optsAssigned;
+		let i,i0,l0,v,k, p, opts,optsAssigned;
 		
 		i = -1;
 		while (++i < pl) {
 			
 			if (!(p = parameters[i]) || typeof p !== 'object') continue;
+			
+			if (p instanceof String && p[spNests]) {
+				parameters[i] = { v: this.get(p, assigned) };
+				continue;
+			}
 			
 			p.suppressed && (p = p.suppressed);
 			
@@ -1356,12 +1403,18 @@ export class Strings {
 			p.v = this.desc.get(p, assigned);
 			
 		}
-		//hi(parameters);
-		const composed = Composer.compose(parameters), cl = composed.length;
 		
-		//coco
-		//i = -1;
-		//while (++i < cl) composed[i] = esc.replace(composed[i]);
+		//hi(parameters);
+		
+		const	composed = Composer.compose(parameters),
+				cl = composed.length,
+				escs = new Set([ ...this.sp.fetchEscs(), ...this.exp.fetchEscs(), this.optionsSeparator.seq, this.optionsMasks.seq ]);
+		
+		for (v of escs) {
+			if (!v) continue;
+			i = -1;
+			while (++i < cl) composed[i] = v.replace(composed[i]);
+		}
 		
 		return composed;
 		
@@ -1407,6 +1460,7 @@ export class StringsParser extends ParseHelper {
 		
 		this.assignedIndex = Symbol('StringsParser.assignedIndex'),
 		//this.optionName = Symbol('StringsParser.optionName'),
+		this.nests = Symbol('StringsParser.nests'),
 		
 		// esc = escape
 		this[ParseHelper.esc] = '\\',
@@ -1445,7 +1499,7 @@ export class StringsParser extends ParseHelper {
 			{ name: s.nst, term: nest, callback: StringsParser.nest },
 			{ name: s.ref, term: ref, callback: StringsParser.reference },
 			{ name: s.syx, term: [ l, r ], callback: StringsParser.parse },
-		];
+		],
 		
 		this.parameterPrecedence = [
 			{ name: s.str, term: str, esc: null, unmasks: true },
@@ -1459,6 +1513,13 @@ export class StringsParser extends ParseHelper {
 		
 	}
 	static nest(mask, masks, input, detail, self) {
+		
+		const v = new String(mask.inners[0]);
+		
+		v[StringsParser.nests] = true;
+		
+		return v;
+		
 	}
 	static reference(mask, masks, input, detail, self) {
 	}
@@ -1501,7 +1562,18 @@ export class StringsParser extends ParseHelper {
 		
 		const s = StringsParser[ParseHelper.symbol];
 		
-		this.paramMask = new Terms({ precedence: StringsParser.parameterPrecedence, defaultThis: this, replacer: { [s.str]: [ ...this.termOf('str') ], [s.nst]: [ ...this.termOf('nst') ], [s.syx]: [ ...this.termOf('syx') ] } });
+		this.paramMask =	new Terms({
+									precedence: StringsParser.parameterPrecedence,
+									defaultThis: this,
+									replacer: {
+										[Term.clones]: true,
+										[s.str]: this.termOf('str'),
+										[s.nst]: this.termOf('nst'),
+										[s.syx]: this.termOf('syx')
+									}
+								}),
+		
+		this[ParseHelper.escOwners] = [ this.paramMask, StringsParser.syx.comma ];
 		
 	}
 	
@@ -1659,8 +1731,15 @@ export class StringsExpression extends ParseHelper {
 		
 		const ecs = StringsExpressionCore[ParseHelper.symbol];
 		
-		this.core = core instanceof StringsExpressionCore ? core :
-			new StringsExpressionCore({ replacer: { [ ecs.str ]: [ ...this.termOf('str') ] } });
+		this.core = core instanceof StringsExpressionCore ?	core :
+																				new StringsExpressionCore({
+																					replacer: {
+																						[Term.clones]: true,
+																						[ ecs.str ]: this.termOf('str')
+																					}
+																				}),
+		
+		this[ParseHelper.escOwners] = [ this.paramMask, this.core ];
 		
 	}
 	
@@ -1930,7 +2009,7 @@ export class StringsExpressionCore extends ParseHelper {
 		
 		const s = ParseHelper.setSymbols(this);
 		
-		this.opsPrecedence = this.opsPrecedence = [
+		this.opsPrecedence = [
 			{ sym: s.hu, callback: undefined },
 			{ sym: s.nai, callback: null },
 			{ sym: s.shin, callback: true },
@@ -1965,6 +2044,8 @@ export class StringsExpressionCore extends ParseHelper {
 		
 		i = -1;
 		while (++i < l) this[opsPrecedence[i].sym][termSymbol] = opsPrecedence[i].sym;
+		
+		this[ParseHelper.escOwners] = []
 		
 	}
 	
