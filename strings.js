@@ -1321,7 +1321,8 @@ export class Strings {
 																			replacer: {
 																				[Term.clones]: true,
 																				[es.str]: sp.termOf('str'),
-																				[es.nst]: sp.termOf('nst')
+																				[es.nst]: sp.termOf('nst'),
+																				[es.evl]: sp.termOf('evl')
 																			}
 																		}),
 		
@@ -1341,6 +1342,7 @@ export class Strings {
 		
 		const	parameters = this.sp.get(str, assigned), pl = parameters.length, esc = this.sp.esc,
 				spNests = StringsParser.nests,
+				{ evaluates, refers } = StringsParser,
 				{ nests } = StringsExpression,
 				syntaxError = ParseHelper.syntaxError;
 		let i,i0,l0,v,k, p, opts,optsAssigned;
@@ -1350,9 +1352,18 @@ export class Strings {
 			
 			if (!(p = parameters[i]) || typeof p !== 'object') continue;
 			
-			if (p instanceof String && p[spNests]) {
-				parameters[i] = { v: this.get(p, assigned) };
+			if (p instanceof String) {
+				
+				parameters[i] = {
+					v:	p[spNests] ? this.get(p, assigned) :
+						p[evaluates] ? StringsExpression.getExecutor(p, 'assigned')(assigned) :
+						p[refers] ? p in assigned ? assigned[p] :
+							p in assigned[StringsParser.assignedIndex] ? assigned[assigned[StringsParser.assignedIndex][p]] :
+							'' :
+						''+p
+				};
 				continue;
+				
 			}
 			
 			p.suppressed && (p = p.suppressed);
@@ -1461,6 +1472,8 @@ export class StringsParser extends ParseHelper {
 		this.assignedIndex = Symbol('StringsParser.assignedIndex'),
 		//this.optionName = Symbol('StringsParser.optionName'),
 		this.nests = Symbol('StringsParser.nests'),
+		this.evaluates = Symbol('StringsParser.evaluates'),
+		this.refers = Symbol('StringsParser.refers'),
 		
 		// esc = escape
 		this[ParseHelper.esc] = '\\',
@@ -1477,6 +1490,7 @@ export class StringsParser extends ParseHelper {
 		(this.syx = {
 			str: [ "'", "'" ],
 			nest: [ '<', '>' ],
+			evl: [ '`', '`' ],
 			ref: [ '*', '*' ],
 			//arg: [ '(', ')' ],
 			l: '[',
@@ -1490,15 +1504,16 @@ export class StringsParser extends ParseHelper {
 			new Chr(new RegExp(`[${Unit.escapeRegExpPattern(this.syx.suppressor + this.syx.separator)}]`, 'g'));
 		
 		const	s = ParseHelper.setSymbols(this),
-				{ str,nest,ref,arg, l, r, assign, suppressor, separator } = this.syx,
+				{ str,nest,evl,ref,arg, l, r, assign, suppressor, separator } = this.syx,
 				assignment = this.syx.assignment;
 		
 		this[ParseHelper.precedenceDescriptors] = [
 			{ name: s.str, term: str, unmasks: true },
 			//{ name: s.arg, term: arg, unmasks: true },
-			{ name: s.nst, term: nest, callback: StringsParser.nest },
-			{ name: s.ref, term: ref, callback: StringsParser.reference },
 			{ name: s.syx, term: [ l, r ], callback: StringsParser.parse },
+			{ name: s.nst, term: nest, callback: StringsParser.nest },
+			{ name: s.evl, term: evl, callback: StringsParser.evl },
+			{ name: s.ref, term: ref, callback: StringsParser.reference },
 		],
 		
 		this.parameterPrecedence = [
@@ -1521,7 +1536,23 @@ export class StringsParser extends ParseHelper {
 		return v;
 		
 	}
+	static evl(mask, masks, input, detail, self) {
+		
+		const v = new String(mask.inners[0]);
+		
+		v[StringsParser.evaluates] = true;
+		
+		return v;
+		
+	}
 	static reference(mask, masks, input, detail, self) {
+		
+		const v = new String(mask.inners[0]);
+		
+		v[StringsParser.refers] = true;
+		
+		return v;
+		
 	}
 	static parse(mask, masks, input, detail, self) {
 		
@@ -1595,33 +1626,16 @@ export class StringsParser extends ParseHelper {
 	
 }
 
-//export class StringsOptionParser extends ParseHelper {
-//	
-//	static {
-//		
-//		this[ParseHelper.precedenceDescriptors] = [
-//			{ name: 'brk', term: [ '(', ')'], callback: StringsOptionParser.parse }
-//		];
-//		
-//	}
-//	static parse() {
-//	}
-//	
-//	constructor(configuration) {
-//		
-//		super(configuration, StringsOptionParser);
-//		
-//		const s = StringsParser.symbol;
-//		
-//	}
-//	
-//}
-
 export class StringsExpression extends ParseHelper {
 	
 	static eval(mask, masks, input, detail, self) {
 		
-		return (new Function('assigned', mask.inners[0]))(detail);
+		return StringsExpression.getExecutor(mask.inners[0], 'assigned')(detail);
+		
+	}
+	static getExecutor(code, ...argNames) {
+		
+		return new Function(...argNames, code);
 		
 	}
 	static nest(mask, masks, input, detail, self) {
