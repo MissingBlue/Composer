@@ -3,7 +3,8 @@ export class Indexer {
 	static {
 		
 		this.indexed = Symbol('Indexer.indexed'),
-		this.lastIndex = Symbol('Indexer.lastIndex');
+		this.lastIndex = Symbol('Indexer.lastIndex'),
+		this.anon = Symbol('Indexer.anon');
 		
 	}
 	
@@ -44,7 +45,7 @@ export class Indexer {
 		
 	}
 	getCache(str) {
-		return this.cache?.[str];
+		return this.cache?.[str ?? Indexer.anon];
 	}
 	
 }
@@ -65,7 +66,7 @@ export class Unit extends Indexer {
 				(rx = { pattern: Unit.escapeRegExpPattern(''+(rx || '')), unescapes: true, flags }),
 			typeof (flags = 'flags' in rx ? rx.flags : flags) === 'string' ?
 				flags.indexOf('g') === -1 && (flags += 'g') : (flags = 'g'),
-			rx = new RegExp(rx?.unescapes ? rx.pattern : Unit.escapeRegExpPattern(rx.pattern), flags)
+			rx = new RegExp((rx?.unescapes ? rx?.pattern: Unit.escapeRegExpPattern(rx.pattern)) ?? Unit.unit, flags)
 		);
 		
 		if (!rx.global) throw new TypeError('RegExp must be global.');
@@ -259,7 +260,7 @@ export class Chr extends Unit {
 		
 		i = i0 = -1;
 		while (++i < l) lastIndex in (seq = seqs[i]) && (seqLastIndices[++i0] = seq[lastIndex]);
-		
+		//hi(str,this.unit.source,this,matched,seqLastIndices);
 		return this.setCache(matched, m => seqLastIndices.indexOf(m.index) === -1);
 		
 	}
@@ -359,14 +360,14 @@ export class Chr extends Unit {
 		
 	}
 	
-	clone() {
+	clone(seq) {
 		
-		const { unit, seq, matchesEmpty } = this;
+		const { unit, matchesEmpty } = this;
 		
 		return new Chr(
 				{ pattern: unit.source, flags: unit.flags, unescapes: true },
-				seq instanceof Sequence ?
-					{ pattern: seq.source, flags: seq.flags, repetition: seq.repetition, unescapes: true } : null,
+				(seq = arguments.length ? seq : this.seq) instanceof Sequence ?
+					{ pattern: seq.unit.source, flags: seq.unit.flags, repetition: seq.repetition, unescapes: true } : null,
 				matchesEmpty
 			);
 		
@@ -571,7 +572,7 @@ export class Term extends Array {
 				idx = Number.isInteger(a1 = gets ? a0 : a1) ? a1 > -1 ? a1 : this.length + a1 : this.length - 1;
 		
 		return gets ?	(a0 = this[idx] || a1 || fallback) instanceof Chr ? a0 : (this[idx] = new Chr(a0, this.escSeq)) :
-							(this[idx] = (a0 ||= fallback) instanceof Chr ? a0 : new Chr(a0, this.escSeq));
+							(this[a0] = (a1 ||= fallback) instanceof Chr ? a1 : new Chr(a1, this.escSeq));
 		
 	}
 	
@@ -741,7 +742,7 @@ export class Term extends Array {
 		let i, source, chr;
 		
 		i = -1, clone.setDefaultEscSeq(escSeq);
-		while (++i < l)	clone[i] = chr = (source = this.chr(i)).clone(),
+		while (++i < l)	chr = clone.chr(i, (source = this.chr(i)).clone(null)),
 								callback && chr.setCallback(hasCallback ? callback : source[cb], thisArg);
 		
 		return clone;
@@ -852,7 +853,7 @@ export class Terms extends Array {
 				
 				term = this[++ti] = this[typeof pd.name === 'symbol' ? pd.name : Symbol(pd.name)] =
 					(term = replacer && (replaces = pd.name in replacer) ? replacer[pd.name] : pd.term) instanceof Term ?
-						replaces && clones ? term.clone() : term : new Term(term, 'esc' in pd ? pd.esc : esc),
+						replaces && clones ? term.clone('esc' in pd ? pd.esc : esc) : term : new Term(term, 'esc' in pd ? pd.esc : esc),
 				
 				(callback = pd.callback) && term.setCallback(callback, this),
 				//(callback = pd.callback) && (
@@ -1293,7 +1294,6 @@ export class ParseHelper extends Terms {
 
 export class Strings {
 	
-	static anonAssignKey = Symbol('Strings.anonAssignKey');
 	static {
 		
 		this.options = {
@@ -1314,15 +1314,16 @@ export class Strings {
 		
 		sp = this.sp = sp instanceof StringsParser ? sp : new StringsParser(sp);
 		
-		const	es = StringsExpression[ParseHelper.symbol];
+		const	sps = StringsParser[ParseHelper.symbol], es = StringsExpression[ParseHelper.symbol];
 		
 		this.exp = exp instanceof StringsExpression ?	exp :
 																		new StringsExpression({
 																			replacer: {
 																				[Term.clones]: true,
-																				[es.str]: sp.termOf('str'),
-																				[es.nst]: sp.termOf('nst'),
-																				[es.evl]: sp.termOf('evl')
+																				[es.str]: this.sp[sps.str],
+																				[es.ref]: this.sp[sps.ref],
+																				[es.nst]: this.sp[sps.nst],
+																				[es.evl]: this.sp[sps.evl]
 																			}
 																		}),
 		
@@ -1338,7 +1339,7 @@ export class Strings {
 	
 	get(str, assigned = this.assigned) {
 		
-		(assigned && typeof assigned === 'object') || (assigned = { [Strings.anonAssignKey]: assigned });
+		(assigned && typeof assigned === 'object') || (assigned = { [StringsExpression.anonAssignKey]: assigned });
 		
 		const	parameters = this.sp.get(str, assigned), pl = parameters.length, esc = this.sp.esc,
 				spNests = StringsParser.nests,
@@ -1457,7 +1458,7 @@ export class Strings {
 		let i, arg;
 		
 		i = -1;
-		while (++i < l && (arg = args[i]) !== syntaxError) arg[nests] && (args[i] = this.get(arg, assigned));
+		while (++i < l && (arg = args[i]) !== syntaxError) arg?.[nests] && (args[i] = this.get(arg, assigned));
 		
 		return i === l ? args : syntaxError;
 		
@@ -1491,15 +1492,15 @@ export class StringsParser extends ParseHelper {
 			str: [ "'", "'" ],
 			nest: [ '<', '>' ],
 			evl: [ '`', '`' ],
-			ref: [ '*', '*' ],
+			ref: [ '$[', ']' ],
 			//arg: [ '(', ')' ],
 			l: '[',
 			r: ']',
 			assign: '=',
 			suppressor: ';',
 			separator: ':',
-			comma: new Chr(/[\s\t]*,[\s\t]*/g),
-			//space: new Chr(/[\s\t]+/g)
+			comma: new Chr(/[\n\s\t]*,[\n\s\t]*/g),
+			//space: new Chr(/[\n\s\t]+/g)
 		}).assignment =
 			new Chr(new RegExp(`[${Unit.escapeRegExpPattern(this.syx.suppressor + this.syx.separator)}]`, 'g'));
 		
@@ -1510,14 +1511,15 @@ export class StringsParser extends ParseHelper {
 		this[ParseHelper.precedenceDescriptors] = [
 			{ name: s.str, term: str, unmasks: true },
 			//{ name: s.arg, term: arg, unmasks: true },
+			{ name: s.ref, term: ref, callback: StringsParser.reference },
 			{ name: s.syx, term: [ l, r ], callback: StringsParser.parse },
 			{ name: s.nst, term: nest, callback: StringsParser.nest },
 			{ name: s.evl, term: evl, callback: StringsParser.evl },
-			{ name: s.ref, term: ref, callback: StringsParser.reference },
 		],
 		
 		this.parameterPrecedence = [
 			{ name: s.str, term: str, esc: null, unmasks: true },
+			{ name: s.ref, term: ref, esc: null, unmasks: true },
 			{ name: s.nst, term: nest, esc: null, unmasks: true },
 			//{ name: s.arg, term: arg, esc: null, unmasks: true },
 			{ name: s.syx, term: [ l, r ], esc: null, unmasks: true },
@@ -1558,9 +1560,8 @@ export class StringsParser extends ParseHelper {
 		
 		const pm = this.paramMask.getMasks(mask.inners[0]).masks;
 		
-		if (pm.length !== 1) return mask.$;
-		
-		const	{ assign, comma, suppressor, space } = StringsParser.syx,
+		const	s = StringsParser[ParseHelper.symbol],
+				{ assign, comma, suppressor, space } = StringsParser.syx,
 				{ captor, splitted } = pm[0][0],
 				header = splitted[1].split(assign),
 				descriptor = header[0]?.trim?.(),
@@ -1571,11 +1572,11 @@ export class StringsParser extends ParseHelper {
 		
 		switch (captor) {
 			
-			case this.paramMask.termOf('sys'):
+			case this.paramMask[s.sys]:
 			args = splitted[3];
 			break;
 			
-			case this.paramMask.termOf('syl'):
+			case this.paramMask[s.syl]:
 			options = splitted[3].trim(), args = splitted[5];
 			break;
 			
@@ -1598,9 +1599,10 @@ export class StringsParser extends ParseHelper {
 									defaultThis: this,
 									replacer: {
 										[Term.clones]: true,
-										[s.str]: this.termOf('str'),
-										[s.nst]: this.termOf('nst'),
-										[s.syx]: this.termOf('syx')
+										[s.str]: this[s.str],
+										[s.ref]: this[s.ref],
+										[s.nst]: this[s.nst],
+										[s.syx]: this[s.syx]
 									}
 								}),
 		
@@ -1669,7 +1671,7 @@ export class StringsExpression extends ParseHelper {
 		
 		let v;
 		
-		(v = new String(mask.$))[StringsExpression.identifies] = true;
+		(v = new String(mask.captor === this[StringsExpression[ParseHelper.symbol].ref] ? mask.inners[0] : mask.$))[StringsExpression.identifies] = true;
 		
 		return v;
 		
@@ -1691,7 +1693,7 @@ export class StringsExpression extends ParseHelper {
 			case 'number': return ''+v;
 			case 'function': return StringsExpression.stringify(v());
 			case 'string': return `'${v}'`;
-			case 'undefined': return 'fu';
+			case 'undefined': return 'hu';
 			case 'object':
 			if (Array.isArray(v)) {
 				
@@ -1722,13 +1724,15 @@ export class StringsExpression extends ParseHelper {
 		this.nests = Symbol('StringsExpression.nests'),
 		this.isGroup = Symbol('StringsExpression.isGroup'),
 		this.identifies = Symbol('StringsExpression.identifies'),
+		this.anonAssignKey = Symbol('StringsExpression.anonAssignKey');
 		
-		this[ParseHelper.symbolNames] = [ 'spc', 'str', 'evl', 'nst', 'cll', 'idt', 'cmm' ];
+		this[ParseHelper.symbolNames] = [ 'spc', 'str', 'ref', 'evl', 'nst', 'cll', 'idt', 'cmm' ];
 		
 		const	s = ParseHelper.setSymbols(this);
 		
 		this[ParseHelper.precedenceDescriptors] = [
 			{ name: s.str, term: [ "'", "'" ], esc: null, unmasks: true },
+			{ name: s.ref, term: [ '$[', ']' ], esc: null, callback: StringsExpression.identify },
 			{ name: s.evl, term: [ '`', '`' ], esc: null, callback: StringsExpression.eval },
 			{ name: s.nst, term: [ '<', '>' ], esc: null, callback: StringsExpression.nest },
 			{ name: s.cll, term: [ '(', ')' ], esc: null, callback: StringsExpression.call },
@@ -1743,13 +1747,13 @@ export class StringsExpression extends ParseHelper {
 		
 		super(configuration, StringsExpression);
 		
-		const ecs = StringsExpressionCore[ParseHelper.symbol];
+		const s = StringsExpression[ParseHelper.symbol], ecs = StringsExpressionCore[ParseHelper.symbol];
 		
 		this.core = core instanceof StringsExpressionCore ?	core :
 																				new StringsExpressionCore({
 																					replacer: {
 																						[Term.clones]: true,
-																						[ ecs.str ]: this.termOf('str')
+																						[ ecs.str ]: this[s.str]
 																					}
 																				}),
 		
@@ -1771,7 +1775,7 @@ export class StringsExpression extends ParseHelper {
 	[ParseHelper.after](parsed, parsedLength, plot, plotLength, input, detail, self) {
 		
 		const	core = this.core, comma = this.symOf('cmm'), values = [],
-				{ identifies, nests, stringify } = StringsExpression,
+				{ anonAssignKey, identifies, nests, stringify } = StringsExpression,
 				syntaxError = ParseHelper.syntaxError;
 		let i,i0,l0,vi, p,p0,pl0, beginIndex, v;
 		
@@ -1781,6 +1785,8 @@ export class StringsExpression extends ParseHelper {
 			if (p instanceof String) {
 				
 				if (p[identifies]) {
+					
+					''+p || (p = anonAssignKey);
 					
 					if (typeof (p = detail?.[p]) === 'function' && Array.isArray(p0 = parsed[i + 1])) {
 						
@@ -2093,7 +2099,7 @@ export class StringsExpressionCore extends ParseHelper {
 		const l = opsPrecedence.length, splice = Array.prototype.splice;
 		let i0,li,ri, op,v, lp, spliceArgsLength, sym,cb,hasCb;
 		
-		i = 0, lp = parsedLength - 1;
+		i = -1, lp = parsedLength - 1;
 		while (++i < l) {
 			
 			i0 = -1, sym = (op = opsPrecedence[i]).sym, hasCb = typeof (cb = op.callback) === 'function';
