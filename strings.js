@@ -1344,7 +1344,7 @@ export class Strings {
 		const	parameters = this.sp.get(str, assigned), pl = parameters.length, esc = this.sp.esc,
 				spNests = StringsParser.nests,
 				{ evaluates, refers } = StringsParser,
-				{ nests } = StringsExpression,
+				{ nests, anonAssignKey } = StringsExpression,
 				syntaxError = ParseHelper.syntaxError;
 		let i,i0,l0,v,k, p, opts,optsAssigned;
 		
@@ -1358,7 +1358,7 @@ export class Strings {
 				parameters[i] = {
 					v:	p[spNests] ? this.get(p, assigned) :
 						p[evaluates] ? StringsExpression.getExecutor(p, 'assigned')(assigned) :
-						p[refers] ? p in assigned ? assigned[p] :
+						p[refers] ?  (p += '', p ||= anonAssignKey) in assigned ? assigned[p] :
 							p in assigned[StringsParser.assignedIndex] ? assigned[assigned[StringsParser.assignedIndex][p]] :
 							'' :
 						''+p
@@ -1384,20 +1384,6 @@ export class Strings {
 				
 			}
 			
-			//if (Array.isArray(args = p.args) && (l0 = args.length)) {
-			//	
-			//	//i0 = -1;
-			//	//while (++i0 < l0 && (args[i0] = this.exp.get(args[i0], assigned)) !== syntaxError)
-			//	//	args[i0][nests] && (args[i0] = this.get(args[i0], assigned));
-			//	
-			//	if ((p.args = this.parseArgs(args, assigned)) === parsedError) {
-			//		//parameters[i] = p.suppressed ? p.suppressed.source : p.source;
-			//		parameters[i] = p.source;
-			//		continue;
-			//	}
-			//	
-			//}
-			
 			if (opts = p.options) {
 				
 				optsAssigned = {};
@@ -1409,10 +1395,12 @@ export class Strings {
 				while (++i0 < l0) this.evaluate(opts[i0], optsAssigned);
 				
 			}
-			//p.options &&= this.evaluate(p.options, { ...assigned, ...Strings.options }),
+			
 			p.args &&= this.evaluate(p.args, assigned),
 			
-			p.v = this.desc.get(p, assigned);
+			p.v = this.desc.get(p, assigned),
+			
+			p.label !== null && assigned && typeof assigned === 'object' && (assigned[p.label || anonAssignKey] = p.v);
 			
 		}
 		
@@ -1565,7 +1553,7 @@ export class StringsParser extends ParseHelper {
 				{ captor, splitted } = pm[0][0],
 				header = splitted[1].split(assign),
 				descriptor = header[0]?.trim?.(),
-				label = header?.[1]?.trim?.(),
+				label = header.length > 1 ? header?.[1]?.trim?.() : null,
 				suppresses = suppressor instanceof RegExp ? suppressor.test(splitted[2][0]) : splitted[2][0] === suppressor,
 				{ optionName, syntaxError } = StringsParser;
 		let i,l, options,opt, args, v;
@@ -2138,7 +2126,8 @@ export class StringsDescriptor {
 	static {
 		
 		this.deletes = Symbol('StringsDescriptor.deletes'),
-		this.reflects = Symbol('StringsDescriptor.reflects');
+		this.reflects = Symbol('StringsDescriptor.reflects'),
+		this.variadic = Symbol('StringsDescriptor.variadic');
 		
 	}
 	
@@ -2152,12 +2141,12 @@ export class StringsDescriptor {
 	
 	get(parameter, assigned, property) {
 		
-		const	descriptor = this.descriptor[parameter.descriptor || 'I'];
+		const	descriptor = this.descriptor[parameter.descriptor || 'I'], { variadic } = StringsDescriptor;
 		let v;
 		
 		if (Array.isArray(descriptor) && descriptor[StringsDescriptor.reflects] && typeof descriptor[0] === 'function') {
 			
-			const l = descriptor[0].length, args = [];
+			const l = descriptor[0][variadic] ? parameter.args.length : descriptor[0].length, args = [];
 			let i;
 			
 			i = -1;
@@ -2166,8 +2155,6 @@ export class StringsDescriptor {
 			v = Reflect.apply(descriptor[0], descriptor[1], [ ...args, ...descriptor[2] ]);
 			
 		} else v = descriptor;
-		
-		parameter.label && assigned && typeof assigned === 'object' && (assigned[parameter.label] = v);
 		
 		return v;
 		
@@ -2348,9 +2335,16 @@ strings.register([ '@', 'app' ], [ Reflector.describe, Reflector ]);
 
 class Inline {
 	
-	static describe(v) {
+	static describe() {
 		
-		return v ?? '';
+		const l = arguments.length;
+		
+		return l ? l === 1 ? arguments[0] ?? '' : [ ...arguments ] : '';
+		
+	}
+	static {
+		
+		this.describe[StringsDescriptor.variadic] = true;
 		
 	}
 	
@@ -2769,20 +2763,24 @@ export class Composer {
 				//	
 				//}
 				
-				if (Array.isArray(p.v) && p.v[Composer.reflections]) {
+				if (Array.isArray(p.v)) {
 					
-					i0 = -1, l0 = p.v.length;
-					while (++i0 < l0) {
+					if (p.v[Composer.reflections]) {
 						
-						if (p.v[i0][Composer.each]) {
+						i0 = -1, l0 = p.v.length;
+						while (++i0 < l0) {
 							
-							i1 = -1, l1 = values.length;
-							while (++i1 < l1)
-								values[i1] = Reflect.apply(...Composer.replaceValue(p.v[i0], Composer.$, values[i1]));
+							if (p.v[i0][Composer.each]) {
+								
+								i1 = -1, l1 = values.length;
+								while (++i1 < l1)
+									values[i1] = Reflect.apply(...Composer.replaceValue(p.v[i0], Composer.$, values[i1]));
+								
+							} else Reflect.apply(...Composer.replaceValue(p.v[i0], Composer.$, values));
 							
-						} else Reflect.apply(...Composer.replaceValue(p.v[i0], Composer.$, values));
+						}
 						
-					}
+					} else values.push(...p.v);
 					
 				} else values[0] = p.v;
 				
