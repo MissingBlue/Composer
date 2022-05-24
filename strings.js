@@ -1357,7 +1357,7 @@ export class Strings {
 				
 				parameters[i] = {
 					v:	p[spNests] ? this.get(p, assigned) :
-						p[evaluates] ? StringsExpression.getExecutor(p, 'assigned')(assigned) :
+						p[evaluates] ? StringsExpression.getExecutor(p, 'assigned')?.(assigned) :
 						p[refers] ?  (p += '', p ||= anonAssignKey) in assigned ? assigned[p] :
 							p in assigned[StringsParser.assignedIndex] ? assigned[assigned[StringsParser.assignedIndex][p]] :
 							'' :
@@ -1509,6 +1509,7 @@ export class StringsParser extends ParseHelper {
 			{ name: s.str, term: str, esc: null, unmasks: true },
 			{ name: s.ref, term: ref, esc: null, unmasks: true },
 			{ name: s.nst, term: nest, esc: null, unmasks: true },
+			{ name: s.evl, term: evl, esc: null, unmasks: true },
 			//{ name: s.arg, term: arg, esc: null, unmasks: true },
 			{ name: s.syx, term: [ l, r ], esc: null, unmasks: true },
 			// sys = syntax short, syl = syntax long
@@ -1590,6 +1591,7 @@ export class StringsParser extends ParseHelper {
 										[s.str]: this[s.str],
 										[s.ref]: this[s.ref],
 										[s.nst]: this[s.nst],
+										[s.evl]: this[s.evl],
 										[s.syx]: this[s.syx]
 									}
 								}),
@@ -1620,7 +1622,7 @@ export class StringsExpression extends ParseHelper {
 	
 	static eval(mask, masks, input, detail, self) {
 		
-		return StringsExpression.getExecutor(mask.inners[0], 'assigned')(detail);
+		return { [StringsExpression.evaluated]: StringsExpression.getExecutor(mask.inners[0], 'assigned')(detail) };
 		
 	}
 	static getExecutor(code, ...argNames) {
@@ -1645,8 +1647,8 @@ export class StringsExpression extends ParseHelper {
 		// 変更時に影響の確認を怠っていたものと思われる。
 		//return this.get(inner, detail)[0];
 		
-		//const v = StringExpression.stringify(this.get(mask.inners[0], detail));
-		//v[StringExpression.isGroup] = true;
+		//const v = StringsExpression.stringify(this.get(mask.inners[0], detail));
+		//v[StringsExpression.isGroup] = true;
 		
 		const v = this.get(mask.inners[0], detail);
 		
@@ -1685,16 +1687,19 @@ export class StringsExpression extends ParseHelper {
 			case 'object':
 			if (Array.isArray(v)) {
 				
-				if (v[StringExpression.isGroup]) {
-					
-					const l = v.length, v0 = [], stringify = StringExpression.stringify;
-					let i;
-					
-					i = -1;
-					while (++i < l) v0[i] = stringify(v[i]);
-					return '(' + v0.join(',') + ')';
-					
-				}
+				//if (v[StringsExpression.isGroup]) {
+				//	
+				//	const l = v.length, v0 = [], stringify = StringsExpression.stringify;
+				//	let i;
+				//	
+				//	i = -1;
+				//	while (++i < l) v0[i] = stringify(v[i]);
+				//	return '(' + v0.join(',') + ')';
+				//	
+				//}
+				//
+				//return v;
+				return v.length ? StringsExpression.stringify(v[v.length - 1]) : '';
 				
 			} else if (!v) {
 				
@@ -1712,6 +1717,7 @@ export class StringsExpression extends ParseHelper {
 		this.nests = Symbol('StringsExpression.nests'),
 		this.isGroup = Symbol('StringsExpression.isGroup'),
 		this.identifies = Symbol('StringsExpression.identifies'),
+		this.evaluated = Symbol('StringsExpression.evaluated'),
 		this.anonAssignKey = Symbol('StringsExpression.anonAssignKey');
 		
 		this[ParseHelper.symbolNames] = [ 'spc', 'str', 'ref', 'evl', 'nst', 'cll', 'idt', 'cmm' ];
@@ -1763,7 +1769,7 @@ export class StringsExpression extends ParseHelper {
 	[ParseHelper.after](parsed, parsedLength, plot, plotLength, input, detail, self) {
 		
 		const	core = this.core, comma = this.symOf('cmm'), values = [],
-				{ anonAssignKey, identifies, nests, stringify } = StringsExpression,
+				{ anonAssignKey, evaluated, identifies, nests, stringify } = StringsExpression,
 				syntaxError = ParseHelper.syntaxError;
 		let i,i0,l0,vi, p,p0,pl0, beginIndex, v;
 		
@@ -1780,15 +1786,19 @@ export class StringsExpression extends ParseHelper {
 						
 						if ((p = p(...p0)) === syntaxError) break;
 						
-						parsed.splice(i--, 2, stringify(p)), pl0 = --parsedLength - 1;
+						parsed.splice(i--, 2, p), pl0 = --parsedLength - 1;
 							
-					} else if ((parsed[i] = stringify(p)) === syntaxError) break;
+					} else if ((parsed[i] = p) === syntaxError) break;
 					
 				} else parsed[i] = p;
 				
 			} else if (Array.isArray(p)) {
 				
-				parsed[i] = stringify(p.length ? p[p.length - 1] : '');
+				parsed[i] = p.length ? p[p.length - 1] : '';
+				
+			} if (p && typeof p === 'object') {
+				
+				if (p[evaluated]) parsed[i] = p[evaluated];
 				
 			}
 			//else if (p && typeof p === 'object') {
@@ -1809,7 +1819,11 @@ export class StringsExpression extends ParseHelper {
 				} else {
 					
 					i0 = -1;
-					while (++i0 < l0 && typeof v[i0] === 'string' && !v[i0][nests]);
+					while (
+						++i0 < l0 &&
+						(typeof v[i0] === 'string' || typeof (v[i0] = stringify(v[i0])) === 'string') &&
+						!v[i0][nests]
+					);
 					if (i0 < l0 || (v = core.get(v.join(''))) === syntaxError) break;
 					
 				}
