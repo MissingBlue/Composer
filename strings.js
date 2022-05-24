@@ -1966,19 +1966,19 @@ export class StringsExpressionCore extends ParseHelper {
 	//	return [ idx, 1, v ];
 	//	
 	//}
-	static kwd(v, left, right, idx, ldx, rdx, parsed, parsedLength, plot, plotLength, input, detail, self) {
-		
-		switch (v) {
-			case 'nai': v = null; break;
-			case 'hu': v = undefined; break;
-			case 'shin': v = true; break;
-			case 'gi': v = false; break;
-			default: throw new SyntaxError(`Got an unknown keyword "${v}".`);
-		}
-		
-		return [ idx, 1, v ];
-		
-	}
+	//static kwd(v, left, right, idx, ldx, rdx, parsed, parsedLength, plot, plotLength, input, detail, self) {
+	//	
+	//	switch (v) {
+	//		case 'nai': case 'null': v = null; break;
+	//		case 'hu': case 'undefined': v = undefined; break;
+	//		case 'shin': case 'true': v = true; break;
+	//		case 'gi': case 'false': v = false; break;
+	//		default: throw new SyntaxError(`Got an unknown keyword "${v}".`);
+	//	}
+	//	
+	//	return [ idx, 1, v ];
+	//	
+	//}
 	
 	//static {
 	//	
@@ -2045,10 +2045,10 @@ export class StringsExpressionCore extends ParseHelper {
 			{ name: s.str, term: [ "'", "'" ], callback: StringsExpressionCore.descriptor.string },
 			{ name: s.num, term: [ /\d+(?:\.\d+)?/g ], callback: StringsExpressionCore.descriptor.number },
 			//{ name: s.ops, term: [ new RegExp('(?:' + ops.join('|') + ')', 'g') ], callback: StringsExpressionCore.descriptor.ops },
-			{ name: s.nai, term: [ 'nai' ], callback: StringsExpressionCore.descriptor.keyword },
-			{ name: s.hu, term: [ 'hu' ], callback: StringsExpressionCore.descriptor.keyword },
-			{ name: s.shin, term: [ 'shin' ], callback: StringsExpressionCore.descriptor.keyword },
-			{ name: s.gi, term: [ 'gi' ], callback: StringsExpressionCore.descriptor.keyword },
+			{ name: s.nai, term: [ /(?:nai|null)/g ], callback: StringsExpressionCore.descriptor.keyword },
+			{ name: s.hu, term: [ /(hu|undefined)/g ], callback: StringsExpressionCore.descriptor.keyword },
+			{ name: s.shin, term: [ /(shin|true)/g ], callback: StringsExpressionCore.descriptor.keyword },
+			{ name: s.gi, term: [ /(gi|false)/g ], callback: StringsExpressionCore.descriptor.keyword },
 			{ name: s.div, term: [ '/' ], callback: StringsExpressionCore.descriptor.keyword },
 			{ name: s.mul, term: [ '*' ], callback: StringsExpressionCore.descriptor.keyword },
 			{ name: s.sub, term: [ '-' ], callback: StringsExpressionCore.descriptor.keyword },
