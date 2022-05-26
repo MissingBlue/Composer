@@ -409,6 +409,8 @@ export class Term extends Array {
 	static {
 		
 		this.callback = Symbol('Term.callback'),
+		this.noCallback = Symbol('Term.noCallback'),
+		this.binds = Symbol('Term.binds'),
 		this.deletes = Symbol('Term.deletes'),
 		this.splices = Symbol('Term.splices'),
 		this.clones = Symbol('Term.clones'),
@@ -477,14 +479,18 @@ export class Term extends Array {
 		if (!ml) return [ str ];
 		
 		const sl = str.length, result = [], max = Math.max, { callback, deletes, splices } = Term;
-		let i,i0,l0,v, mask,sub,cursor, cb;
+		let i,i0,l0,v, mask,sub,cursor, term,cb;
 		
 		i = i0 = -1, cursor = 0, masks.sort(Term.sortLoc);
 		while (++i < ml) {
 			cursor <= (mask = masks[i]).lo && (
 				(sub = str.substring(cursor, max(mask.lo, 0))) && (result[++i0] = sub),
 				cursor = mask.ro,
-				(v = typeof (cb = mask.captor[callback]) === 'function' ? cb(mask, masks, str, detail, self) : mask) === deletes || (Array.isArray(v) && v[splices] ? v.length && (i0 = result.push(...v) - 1) : (result[++i0] = v))
+				v = (term = mask.captor).hasOwnProperty(callback) ?
+					typeof (cb = term[callback]) === 'function' ? cb(mask, masks, str, detail, self) : cb : mask,
+				v === deletes ||
+					(Array.isArray(v) && v[splices] ? v.length && (i0 = result.push(...v) - 1) : (result[++i0] = v))
+				//(v = typeof (cb = mask.captor[callback]) === 'function' ? cb(mask, masks, str, detail, self) : mask) === deletes || (Array.isArray(v) && v[splices] ? v.length && (i0 = result.push(...v) - 1) : (result[++i0] = v))
 			);
 			if (mask.ro >= sl) break;
 		}
@@ -521,14 +527,6 @@ export class Term extends Array {
 		return data;
 		
 	}
-	static createCallback(callback, thisArg) {
-		
-		typeof callback === 'function' && (callback = [ callback ]);
-		
-		return Array.isArray(callback) && typeof callback[0] === 'function' &&
-			callback[0].bind(callback?.[1] ?? thisArg, ...callback.slice(2));
-		
-	}
 	
 	constructor(...chrs) {
 		
@@ -545,9 +543,16 @@ export class Term extends Array {
 		this.escSeq = seq;
 		
 	}
-	setCallback(callback, thisArg = this) {
+	setCallback(cb, thisArg = this) {
 		
-		(callback && (this[Term.callback] = Term.createCallback(callback, thisArg))) || delete this[Term.callback];
+		const { callback, noCallback, binds } = Term;
+		
+		typeof cb === 'function' && ((cb = [ cb ])[binds] = true),
+		
+		cb = Array.isArray(cb) && cb[binds] ?
+			typeof cb[0] === 'function' ? cb[0].bind(cb?.[1] ?? thisArg, ...cb.slice(2)) : noCallback : cb,
+		
+		cb === noCallback ? delete this[callback] : (this[callback] = cb);
 		
 		return this[Term.callback];
 		
@@ -743,7 +748,7 @@ export class Term extends Array {
 		
 		i = -1, clone.setDefaultEscSeq(escSeq);
 		while (++i < l)	chr = clone.chr(i, (source = this.chr(i)).clone(null)),
-								callback && chr.setCallback(hasCallback ? callback : source[cb], thisArg);
+								callback === undefined || chr.setCallback(hasCallback ? callback : source[cb], thisArg);
 		
 		return clone;
 		
@@ -855,12 +860,8 @@ export class Terms extends Array {
 					(term = replacer && (replaces = pd.name in replacer) ? replacer[pd.name] : pd.term) instanceof Term ?
 						replaces && clones ? term.clone('esc' in pd ? pd.esc : esc) : term : new Term(term, 'esc' in pd ? pd.esc : esc),
 				
-				(callback = pd.callback) && term.setCallback(callback, this),
-				//(callback = pd.callback) && (
-				//		typeof callback === 'function' && (callback = [ callback ]),
-				//		Array.isArray(callback) && typeof callback[0] === 'function' &&
-				//			(term[Terms.callback] = callback[0].bind(callback?.[1] ?? defaultThis, ...callback.slice(2)))
-				//	),
+				'callback' in pd && term.setCallback(pd.callback, this),
+				
 				pd.unmasks && (term[Terms.unmasks] = true);
 				
 			}
@@ -1618,228 +1619,215 @@ export class StringsParser extends ParseHelper {
 	
 }
 
+//export class StringsExpression extends ParseHelper {
+//	
+//	static eval(mask, masks, input, detail, self) {
+//		
+//		return { [StringsExpression.evaluated]: StringsExpression.getExecutor(mask.inners[0], 'assigned')(detail) };
+//		
+//	}
+//	static getExecutor(code, ...argNames) {
+//		
+//		return new Function(...argNames, code);
+//		
+//	}
+//	static nest(mask, masks, input, detail, self) {
+//		
+//		let v;
+//		
+//		(v = new String(mask.inners[0]))[StringsExpression.nests] = true;
+//		
+//		return v;
+//		
+//	}
+//	static call(mask, masks, input, detail, self) {
+//		
+//		const v = this.get(mask.inners[0], detail);
+//		
+//		return v;
+//		
+//	}
+//	static identify(mask, masks, input, detail, self) {
+//		
+//		let v;
+//		
+//		(v = new String(mask.inners[0]))[StringsExpression.identifies] = true;
+//		
+//		return v;
+//		
+//	}
+//	static space(mask, masks, input, detail, self) {
+//		
+//		return Term.deletes;
+//		
+//	}
+//	static comma(mask, masks, input, detail, self) {
+//		
+//		return this.symOf('cmm');
+//		
+//	}
+//	static stringify(v) {
+//		
+//		switch (typeof v) {
+//			case 'boolean': return v ? 'shin' : 'gi';
+//			case 'number': return ''+v;
+//			case 'function': return StringsExpression.stringify(v());
+//			case 'string': return `'${v}'`;
+//			case 'undefined': return 'hu';
+//			case 'object':
+//			if (Array.isArray(v)) {
+//				
+//				//if (v[StringsExpression.isGroup]) {
+//				//	
+//				//	const l = v.length, v0 = [], stringify = StringsExpression.stringify;
+//				//	let i;
+//				//	
+//				//	i = -1;
+//				//	while (++i < l) v0[i] = stringify(v[i]);
+//				//	return '(' + v0.join(',') + ')';
+//				//	
+//				//}
+//				//
+//				//return v;
+//				return v.length ? StringsExpression.stringify(v[v.length - 1]) : '';
+//				
+//			} else if (!v) {
+//				
+//				return 'nai';
+//				
+//			}
+//			default:
+//			return ParseHelper.syntaxError;
+//		}
+//		
+//	}
+//	
+//	static {
+//		
+//		this.nests = Symbol('StringsExpression.nests'),
+//		this.isGroup = Symbol('StringsExpression.isGroup'),
+//		this.identifies = Symbol('StringsExpression.identifies'),
+//		this.evaluated = Symbol('StringsExpression.evaluated'),
+//		this.anonAssignKey = Symbol('StringsExpression.anonAssignKey');
+//		
+//		this[ParseHelper.symbolNames] = [ 'spc', 'str', 'ref', 'evl', 'nst', 'cll', 'cmm' ];
+//		
+//		const	s = ParseHelper.setSymbols(this);
+//		
+//		this[ParseHelper.precedenceDescriptors] = [
+//			{ name: s.str, term: [ "'", "'" ], esc: null, unmasks: true },
+//			{ name: s.evl, term: [ '`', '`' ], esc: null, callback: StringsExpression.eval },
+//			{ name: s.nst, term: [ '<', '>' ], esc: null, callback: StringsExpression.nest },
+//			{ name: s.cll, term: [ '(', ')' ], esc: null, callback: StringsExpression.call },
+//			{ name: s.cmm, term: [ ',' ], esc: null, callback: StringsExpression.comma },
+//			{ name: s.spc, term: [ /[\n\s\t]+/g ], callback: StringsExpression.space }
+//		];
+//		
+//	}
+//	
+//	constructor(configuration, core) {
+//		
+//		super(configuration, StringsExpression);
+//		
+//		const s = StringsExpression[ParseHelper.symbol], ecs = StringsExpressionCore[ParseHelper.symbol];
+//		
+//		this.core = core instanceof StringsExpressionCore ?	core :
+//																				new StringsExpressionCore({
+//																					replacer: {
+//																						[Term.clones]: true,
+//																						[ ecs.str ]: this[s.str]
+//																					}
+//																				}),
+//		
+//		this[ParseHelper.escOwners] = [ this.paramMask, this.core ];
+//		
+//	}
+//	
+//	[ParseHelper.main](block, parsed, plot, plotLength, input, detail, self) {
+//		
+//		return block === ParseHelper.syntaxError ?
+//			(
+//				console.error(block, parsed, plot, input, new SyntaxError('Found an invalid argument.')),
+//				ParseHelper.syntaxError
+//			) :
+//			block;
+//		
+//	}
+//	
+//	[ParseHelper.after](parsed, parsedLength, plot, plotLength, input, detail, self) {
+//		
+//		const	core = this.core, comma = this.symOf('cmm'), values = [],
+//				{ anonAssignKey, evaluated, identifies, nests, stringify } = StringsExpression,
+//				syntaxError = ParseHelper.syntaxError;
+//		let i,i0,l0,vi, p,p0,pl0, beginIndex, v;
+//		
+//		i = vi = -1, beginIndex = 0, pl0 = parsedLength - 1;
+//		while (++i < parsedLength && (p = parsed[i]) !== syntaxError) {
+//			
+//			if (p instanceof String) {
+//				
+//				if (p[identifies]) {
+//					
+//					''+p || (p = anonAssignKey);
+//					
+//					if (typeof (p = detail?.[p]) === 'function' && Array.isArray(p0 = parsed[i + 1])) {
+//						
+//						if ((p = p(...p0)) === syntaxError) break;
+//						
+//						parsed.splice(i--, 2, p), pl0 = --parsedLength - 1;
+//							
+//					} else if ((parsed[i] = p) === syntaxError) break;
+//					
+//				} else parsed[i] = p;
+//				
+//			} else if (Array.isArray(p)) {
+//				
+//				parsed[i] = p.length ? p[p.length - 1] : '';
+//				
+//			} if (p && typeof p === 'object') {
+//				
+//				if (p[evaluated]) parsed[i] = p[evaluated];
+//				
+//			}
+//			//else if (p && typeof p === 'object') {
+//			//	
+//			//	parsed[i] = stringify((p = this.get(p.inners[0], detail)).length ? p[p.length - 1] : '');
+//			//	
+//			//} else break;
+//			
+//			if (p === comma || i === pl0) {
+//				
+//				if (
+//					(l0 = (v = parsed.slice(beginIndex, i === pl0 ? i + 1 : i)).length) === 1 &&
+//					(typeof v[0] !== 'string' || v[0][nests])
+//				) {
+//					
+//					v = v[0];
+//					
+//				} else {
+//					
+//					i0 = -1;
+//					while (
+//						++i0 < l0 &&
+//						(typeof v[i0] === 'string' || typeof (v[i0] = stringify(v[i0])) === 'string') &&
+//						!v[i0][nests]
+//					);
+//					if (i0 < l0 || (v = core.get(v.join(''))) === syntaxError) break;
+//					
+//				}
+//				
+//				values[++vi] = v, beginIndex = i + 1;
+//				
+//			}
+//			
+//		}
+//		
+//		return i === parsedLength ? values : syntaxError;
+//		
+//	}
+//	
+//}
 export class StringsExpression extends ParseHelper {
-	
-	static eval(mask, masks, input, detail, self) {
-		
-		return { [StringsExpression.evaluated]: StringsExpression.getExecutor(mask.inners[0], 'assigned')(detail) };
-		
-	}
-	static getExecutor(code, ...argNames) {
-		
-		return new Function(...argNames, code);
-		
-	}
-	static nest(mask, masks, input, detail, self) {
-		
-		let v;
-		
-		(v = new String(mask.inners[0]))[StringsExpression.nests] = true;
-		
-		return v;
-		
-	}
-	static call(mask, masks, input, detail, self) {
-		
-		// コメントの行は変更前の処理で、ネストする計算でエラーが起きていたが、
-		// ここに手を加えた覚えはないものの、戻り値の [0] を外すと動作するようになっている。またおかしくなった時はここを確認。
-		// 実際は手を加えた(恐らく StringsExpression.prototype.after の戻り値)が、ここが変更箇所のいくつかの呼び出し元のひとつであるため、
-		// 変更時に影響の確認を怠っていたものと思われる。
-		//return this.get(inner, detail)[0];
-		
-		//const v = StringsExpression.stringify(this.get(mask.inners[0], detail));
-		//v[StringsExpression.isGroup] = true;
-		
-		const v = this.get(mask.inners[0], detail);
-		
-		return v;
-		
-		//return mask;
-		
-	}
-	static identify(mask, masks, input, detail, self) {
-		
-		let v;
-		
-		(v = new String(mask.captor === this[StringsExpression[ParseHelper.symbol].ref] ? mask.inners[0] : mask.$))[StringsExpression.identifies] = true;
-		
-		return v;
-		
-	}
-	static space(mask, masks, input, detail, self) {
-		
-		return Term.deletes;
-		
-	}
-	static comma(mask, masks, input, detail, self) {
-		
-		return this.symOf('cmm');
-		
-	}
-	static stringify(v) {
-		
-		switch (typeof v) {
-			case 'boolean': return v ? 'shin' : 'gi';
-			case 'number': return ''+v;
-			case 'function': return StringsExpression.stringify(v());
-			case 'string': return `'${v}'`;
-			case 'undefined': return 'hu';
-			case 'object':
-			if (Array.isArray(v)) {
-				
-				//if (v[StringsExpression.isGroup]) {
-				//	
-				//	const l = v.length, v0 = [], stringify = StringsExpression.stringify;
-				//	let i;
-				//	
-				//	i = -1;
-				//	while (++i < l) v0[i] = stringify(v[i]);
-				//	return '(' + v0.join(',') + ')';
-				//	
-				//}
-				//
-				//return v;
-				return v.length ? StringsExpression.stringify(v[v.length - 1]) : '';
-				
-			} else if (!v) {
-				
-				return 'nai';
-				
-			}
-			default:
-			return ParseHelper.syntaxError;
-		}
-		
-	}
-	
-	static {
-		
-		this.nests = Symbol('StringsExpression.nests'),
-		this.isGroup = Symbol('StringsExpression.isGroup'),
-		this.identifies = Symbol('StringsExpression.identifies'),
-		this.evaluated = Symbol('StringsExpression.evaluated'),
-		this.anonAssignKey = Symbol('StringsExpression.anonAssignKey');
-		
-		this[ParseHelper.symbolNames] = [ 'spc', 'str', 'ref', 'evl', 'nst', 'cll', 'idt', 'cmm' ];
-		
-		const	s = ParseHelper.setSymbols(this);
-		
-		this[ParseHelper.precedenceDescriptors] = [
-			{ name: s.str, term: [ "'", "'" ], esc: null, unmasks: true },
-			{ name: s.ref, term: [ '$[', ']' ], esc: null, callback: StringsExpression.identify },
-			{ name: s.evl, term: [ '`', '`' ], esc: null, callback: StringsExpression.eval },
-			{ name: s.nst, term: [ '<', '>' ], esc: null, callback: StringsExpression.nest },
-			{ name: s.cll, term: [ '(', ')' ], esc: null, callback: StringsExpression.call },
-			{ name: s.idt, term: [ /[$A-Za-z_\u0080-\uFFFF][$\w\u0080-\uFFFF]*/g ], callback: StringsExpression.identify },
-			{ name: s.cmm, term: [ ',' ], esc: null, callback: StringsExpression.comma },
-			{ name: s.spc, term: [ /[\n\s\t]+/g ], callback: StringsExpression.space }
-		];
-		
-	}
-	
-	constructor(configuration, core) {
-		
-		super(configuration, StringsExpression);
-		
-		const s = StringsExpression[ParseHelper.symbol], ecs = StringsExpressionCore[ParseHelper.symbol];
-		
-		this.core = core instanceof StringsExpressionCore ?	core :
-																				new StringsExpressionCore({
-																					replacer: {
-																						[Term.clones]: true,
-																						[ ecs.str ]: this[s.str]
-																					}
-																				}),
-		
-		this[ParseHelper.escOwners] = [ this.paramMask, this.core ];
-		
-	}
-	
-	[ParseHelper.main](block, parsed, plot, plotLength, input, detail, self) {
-		
-		return block === ParseHelper.syntaxError ?
-			(
-				console.error(block, parsed, plot, input, new SyntaxError('Found an invalid argument.')),
-				ParseHelper.syntaxError
-			) :
-			block;
-		
-	}
-	
-	[ParseHelper.after](parsed, parsedLength, plot, plotLength, input, detail, self) {
-		
-		const	core = this.core, comma = this.symOf('cmm'), values = [],
-				{ anonAssignKey, evaluated, identifies, nests, stringify } = StringsExpression,
-				syntaxError = ParseHelper.syntaxError;
-		let i,i0,l0,vi, p,p0,pl0, beginIndex, v;
-		
-		i = vi = -1, beginIndex = 0, pl0 = parsedLength - 1;
-		while (++i < parsedLength && (p = parsed[i]) !== syntaxError) {
-			
-			if (p instanceof String) {
-				
-				if (p[identifies]) {
-					
-					''+p || (p = anonAssignKey);
-					
-					if (typeof (p = detail?.[p]) === 'function' && Array.isArray(p0 = parsed[i + 1])) {
-						
-						if ((p = p(...p0)) === syntaxError) break;
-						
-						parsed.splice(i--, 2, p), pl0 = --parsedLength - 1;
-							
-					} else if ((parsed[i] = p) === syntaxError) break;
-					
-				} else parsed[i] = p;
-				
-			} else if (Array.isArray(p)) {
-				
-				parsed[i] = p.length ? p[p.length - 1] : '';
-				
-			} if (p && typeof p === 'object') {
-				
-				if (p[evaluated]) parsed[i] = p[evaluated];
-				
-			}
-			//else if (p && typeof p === 'object') {
-			//	
-			//	parsed[i] = stringify((p = this.get(p.inners[0], detail)).length ? p[p.length - 1] : '');
-			//	
-			//} else break;
-			
-			if (p === comma || i === pl0) {
-				
-				if (
-					(l0 = (v = parsed.slice(beginIndex, i === pl0 ? i + 1 : i)).length) === 1 &&
-					(typeof v[0] !== 'string' || v[0][nests])
-				) {
-					
-					v = v[0];
-					
-				} else {
-					
-					i0 = -1;
-					while (
-						++i0 < l0 &&
-						(typeof v[i0] === 'string' || typeof (v[i0] = stringify(v[i0])) === 'string') &&
-						!v[i0][nests]
-					);
-					if (i0 < l0 || (v = core.get(v.join(''))) === syntaxError) break;
-					
-				}
-				
-				values[++vi] = v, beginIndex = i + 1;
-				
-			}
-			
-		}
-		
-		return i === parsedLength ? values : syntaxError;
-		
-	}
-	
-}
-export class StringsExpressionCore extends ParseHelper {
 	
 	static descriptor = {
 		
@@ -1866,93 +1854,28 @@ export class StringsExpressionCore extends ParseHelper {
 		//	return this.get(v, detail);
 		//	
 		//},
-		number(mask, masks, input, detail, self) {
-			return +mask.$;
-		},
-		
-		string(mask, masks, input, detail, self) {
-			return new String(mask.inners[0]);
-		},
 		
 		//eval(mask, masks, input, detail, self) {
 		//	return (new Function('labeled', mask.$))(detail);
 		//},
-		
-		identify(mask, masks, input, detail, self) {
-			
-			return detail && typeof detail === 'object' ? detail?.[mask.$] ?? undefined : undefined;
-			
-		},
-		
-		ops(mask, masks, input, detail, self) {
-			
-			const op = mask.$, precedence = StringsExpressionCore.opsPrecedence, l = precedence.length;
-			let i;
-			
-			i = -1;
-			while (++i < l && precedence[i].kw.indexOf(op) === -1);
-			
-			if (i === l) throw new SyntaxError(`There are no operator such "${op}".`);
-			
-			return precedence[i].sym;
-		},
 		
 		//comma(mask, masks, input, detail, self) {
 		//	
 		//	return this[ParseHelper.symbol.cmm];
 		//	
 		//}
-		keyword(mask, masks, input, detail, self) {
-			
-			return mask.captor?.[StringsExpressionCore.termSymbol] || ParseHelper.syntaxError;
-			
-		}
 		
 	};
-	static add(v, left, right, idx, ldx, rdx, parsed, parsedLength, plot, plotLength, input, detail, self) {
-		
-		(v =	[
-					idx - (idx - ldx),
-					(rdx ?? idx) - ldx + 1,
-					left === null ? right === null ? null : +right : right === null ? left : left + right
-				])[StringsExpressionCore.splices] = true;
-		
-		return v;
-		
-	}
-	static sub(v, left, right, idx, ldx, rdx, parsed, parsedLength, plot, plotLength, input, detail, self) {
-		
-		(v =	[
-					idx - (idx - ldx),
-					(rdx ?? idx) - ldx + 1,
-					left === null ? right === null ? null : -right : right === null ? left : left - right
-				])[StringsExpressionCore.splices] = true;
-		
-		return v;
-		
-	}
-	static div(v, left, right, idx, ldx, rdx, parsed, parsedLength, plot, plotLength, input, detail, self) {
-		
-		(v =	[
-					idx - (idx - ldx),
-					(rdx ?? idx) - ldx + 1,
-					left === null ? right === null ? null : right : right === null ? left : left / right
-				])[StringsExpressionCore.splices] = true;
-		
-		return v;
-		
-	}
-	static mul(v, left, right, idx, ldx, rdx, parsed, parsedLength, plot, plotLength, input, detail, self) {
-		
-		(v =	[
-					idx - (idx - ldx),
-					(rdx ?? idx) - ldx + 1,
-					left === null ? right === null ? null : right : right === null ? left : left * right
-				])[StringsExpressionCore.splices] = true;
-		
-		return v;
-		
-	}
+	//static keyword(mask, masks, input, detail, self) {
+	//	
+	//	const { dictionary, termSymbol } = StringsExpressionCore, k = mask.captor?.[termSymbol];
+	//	
+	//	return typeof k === 'symbol' ? k in dictionary ? dictionary[k] : k : ParseHelper.syntaxError;
+	//	
+	//	//return mask.captor?.[StringsExpressionCore.termSymbol] || ParseHelper.syntaxError;
+	//	
+	//}
+	
 	//static kwd(v, left, right, idx, ldx, rdx, parsed, parsedLength, plot, plotLength, input, detail, self) {
 	//	
 	//	switch (v) {
@@ -2021,117 +1944,302 @@ export class StringsExpressionCore extends ParseHelper {
 	//	
 	//}
 	
+	static group(mask, masks, input, detail, self) {
+		
+		return this.get(mask.inners[0], detail);
+		
+	}
+	static eval(mask, masks, input, detail, self) {
+		
+		return StringsExpression.getExecutor(mask.inners[0], 'assigned')(detail);
+		
+	}
+	static getExecutor(code, ...argNames) {
+		
+		return new Function(...argNames, code);
+		
+	}
+	// nest のような外部のオブジェクトにバイパスするような機能は、実装が煩雑だが register 的なメソッドを作って動的に任意登録できるような形にすべき。
+	static nest(mask, masks, input, detail, self) {
+		
+		let v;
+		
+		(v = new String(mask.inners[0]))[StringsExpression.nests] = true;
+		
+		return v;
+		
+	}
+	static number(mask, masks, input, detail, self) {
+		
+		return +mask.$;
+		
+	}
+	static string(mask, masks, input, detail, self) {
+		
+		return new String(mask.inners[0]);
+		
+	}
+	static identify(mask, masks, input, detail, self) {
+		
+		const k = (mask.capture === this[StringsExpression[ParseHelper.symbol].ref] ? mask.inners[0] : mask.$) ||
+			StringsExpression.anonAssignKey;
+		
+		return detail && typeof detail === 'object' ? k in detail ? detail[k] : undefined : undefined;
+		
+	}
+	// 変数の展開を StringsExpressionCore(sec) に一元化。
+	// 課題がいくつもあり、関数の実行を sec でする場合、グループ化演算子内部の評価を sec でする必要が出ることを意味するが、
+	// その際いったん StringsExpression に遡る必要が出てくるが、secから呼び出し元のseを辿る仕組みが存在しない。
+	// また、seからsecへグループ化演算子などの配列を渡す仕組みも存在しない。
+	// seでグループを検出したあとにそれを配列化して内部を評価後、評価された値を内部形式に変換した上でsecに渡す方法はあり得るが、
+	// 要素数に比例して処理コストが増大するため、可能であれば直に配列を渡したいが、seからsecへの値の受け渡しはパース対象となる文字列しかないため、
+	// secに配列の存在を示唆する方法が確実な方法が存在しない。例えば配列の位置を文字列内に何らかの形で埋め込んで、それを元にassignedに
+	// 指定された配列を参照する方法が考えられるが、どんな方法にせよ文字列だけでは一意性を確保できない。
+	// 検討: 文字列を String 化して、そこに配列を差し込むべき文字列位置を記録したプロパティを作る？この場合secの機能が単体で処理を完結できなくなる。
+	static _identify(mask, masks, input, detail, self) {
+		
+		let v;
+		
+		(v = new String(mask.inners[0]))[StringsExpression.identifies] = true;
+		
+		return v;
+		
+	}
+	
+	static add(v, left, right, idx, ldx, rdx, exp, parsed, parsedLength, plot, plotLength, input, detail, self) {
+		
+		const { bound, splices } = StringsExpression;
+		
+		(v =	[
+					idx - (idx - ldx),
+					rdx - ldx + 1,
+					left === bound ? right === bound ? null : +right : right === bound ? left : left + right
+				])[splices] = true;
+		
+		return v;
+		
+	}
+	static sub(v, left, right, idx, ldx, rdx, exp, parsed, parsedLength, plot, plotLength, input, detail, self) {
+		
+		const { bound, splices } = StringsExpression;
+		
+		(v =	[
+					idx - (idx - ldx),
+					rdx - ldx + 1,
+					left === bound ? right === bound ? null : -right : right === bound ? left : left - right
+				])[splices] = true;
+		
+		return v;
+		
+	}
+	static div(v, left, right, idx, ldx, rdx, exp, parsed, parsedLength, plot, plotLength, input, detail, self) {
+		
+		const { bound, splices } = StringsExpression;
+		
+		(v =	[
+					idx - (idx - ldx),
+					rdx - ldx + 1,
+					left === bound ? right === bound ? null : right : right === bound ? left : left / right
+				])[splices] = true;
+		
+		return v;
+		
+	}
+	static mul(v, left, right, idx, ldx, rdx, exp, parsed, parsedLength, plot, plotLength, input, detail, self) {
+		
+		const { bound, splices } = StringsExpression;
+		
+		(v =	[
+					idx - (idx - ldx),
+					rdx - ldx + 1,
+					left === bound ? right === bound ? null : right : right === bound ? left : left * right
+				])[splices] = true;
+		
+		return v;
+		
+	}
+	
 	static {
 		
-		this.termSymbol = Symbol('StringsExpressionCore.termSymbol'),
-		this.splices = Symbol('StringsExpressionCore.splices');
+		this.anonAssignKey = Symbol('StringsExpression.anonAssignKey'),
+		this.bound = Symbol('StringsExpression.bound'),
+		this.cursor = Symbol('StringsExpression.cursor'),
+		this.nests = Symbol('StringsExpression.nests'),
+		this.splices = Symbol('StringsExpression.splices'),
 		
-		this[ParseHelper.symbolNames] =
-			[ 'str', 'num', 'ops', 'hu', 'nai', 'shin', 'gi', 'div', 'mul', 'sub', 'add', 'spc' ];
+		this[ParseHelper.symbolNames] = [
+			'grp',
+			'evl',
+			'nst',
+			'str',
+			'ref',
+			'cmm',
+			'num',
+			'nai',
+			'hu',
+			'shin',
+			'gi',
+			'idt',
+			'div',
+			'mul',
+			'sub',
+			'add',
+			'spc'
+		];
 		
 		const s = ParseHelper.setSymbols(this);
 		
 		this.opsPrecedence = [
-			{ sym: s.hu, callback: undefined },
-			{ sym: s.nai, callback: null },
-			{ sym: s.shin, callback: true },
-			{ sym: s.gi, callback: false },
-			{ sym: s.div, callback: StringsExpressionCore.div },
-			{ sym: s.mul, callback: StringsExpressionCore.mul },
-			{ sym: s.sub, callback: StringsExpressionCore.sub },
-			{ sym: s.add, callback: StringsExpressionCore.add }
+			{ sym: s.div, callback: StringsExpression.div },
+			{ sym: s.mul, callback: StringsExpression.mul },
+			{ sym: s.sub, callback: StringsExpression.sub },
+			{ sym: s.add, callback: StringsExpression.add }
 		],
+		
 		this[ParseHelper.precedenceDescriptors] = [
-			{ name: s.str, term: [ "'", "'" ], callback: StringsExpressionCore.descriptor.string },
-			{ name: s.num, term: [ /\d+(?:\.\d+)?/g ], callback: StringsExpressionCore.descriptor.number },
-			//{ name: s.ops, term: [ new RegExp('(?:' + ops.join('|') + ')', 'g') ], callback: StringsExpressionCore.descriptor.ops },
-			{ name: s.nai, term: [ /(?:nai|null)/g ], callback: StringsExpressionCore.descriptor.keyword },
-			{ name: s.hu, term: [ /(hu|undefined)/g ], callback: StringsExpressionCore.descriptor.keyword },
-			{ name: s.shin, term: [ /(shin|true)/g ], callback: StringsExpressionCore.descriptor.keyword },
-			{ name: s.gi, term: [ /(gi|false)/g ], callback: StringsExpressionCore.descriptor.keyword },
-			{ name: s.div, term: [ '/' ], callback: StringsExpressionCore.descriptor.keyword },
-			{ name: s.mul, term: [ '*' ], callback: StringsExpressionCore.descriptor.keyword },
-			{ name: s.sub, term: [ '-' ], callback: StringsExpressionCore.descriptor.keyword },
-			{ name: s.add, term: [ '+' ], callback: StringsExpressionCore.descriptor.keyword }
+			
+			{ name: s.str, term: [ "'", "'" ], callback: StringsExpression.string },
+			{ name: s.evl, term: [ '`', '`' ], callback: StringsExpression.eval },
+			{ name: s.nst, term: [ '<', '>' ], callback: StringsExpression.nest },
+			{ name: s.grp, term: [ '(', ')' ], callback: StringsExpression.group },
+			{ name: s.ref, term: [ '$[', ']' ], callback: StringsExpression.identify },
+			{ name: s.num, term: [ /-?\d+(?:\.\d+)?/g ], callback: StringsExpression.number },
+			{ name: s.nai, term: [ /(?:nai|null)/g ], callback: null },
+			{ name: s.hu, term: [ /(hu|undefined)/g ], callback: undefined },
+			{ name: s.shin, term: [ /(shin|true)/g ], callback: true },
+			{ name: s.gi, term: [ /(gi|false)/g ], callback: false },
+			{ name: s.idt, term: [ /[$A-Za-z_\u0080-\uFFFF][$\w\u0080-\uFFFF]*/g ], callback: StringsExpression.identify },
+			{ name: s.cmm, term: [ ',' ], callback: s.cmm },
+			{ name: s.div, term: [ '/' ], callback: s.div },
+			{ name: s.mul, term: [ '*' ], callback: s.mul },
+			{ name: s.sub, term: [ '-' ], callback: s.sub },
+			{ name: s.add, term: [ '+' ], callback: s.add },
+			{ name: s.spc, term: [ /[\n\s\t]+/g ], callback: Term.deletes }
+			
 		];
 		
 	}
 	
 	constructor(configuration) {
 		
-		super(configuration, StringsExpressionCore);
-		
-		const { opsPrecedence, termSymbol } = StringsExpressionCore, l = opsPrecedence.length;
-		let i;
-		
-		i = -1;
-		while (++i < l) this[opsPrecedence[i].sym][termSymbol] = opsPrecedence[i].sym;
+		super(configuration, StringsExpression);
 		
 		this[ParseHelper.escOwners] = []
 		
 	}
 	
-	//[ParseHelper.main](block, parsed, plot, plotLength, input, detail, self) {
-	//	
-	//	if (typeof block === 'string') {
-	//		console.error(block, parsed, plot, input, new SyntaxError('Found an invalid argument.'));
-	//		return StringsExpressionCore.syntaxError;
-	//	}
-	//	
-	//	block instanceof String && !(StringsExpressionCore.nests in block) && (block += '');
-	//	
-	//	return block;
-	//	
-	//}
-	[ParseHelper.after](parsed, parsedLength, plot, plotLength, input, detail, self) {
+	express(exp, args) {
 		
-		const	{ nests } = StringsExpression, { opsPrecedence, splices } = StringsExpressionCore,
-				syntaxError = ParseHelper.syntaxError;
-		let i,p;
+		const	{ bound, cursor, nests, opsPrecedence, splices } = StringsExpression,
+				ol = opsPrecedence.length,
+				splice = Array.prototype.splice,
+				{ cmm } = StringsExpression[ParseHelper.symbol];
+		let i,l,i0, x,x0, xl,xl0, op,v, li,ri, spliceArgsLength, sym,cb,hasCb;
 		
-		if (parsed.indexOf(syntaxError) !== -1) return syntaxError;
+		if (exp[0]?.[nests]) return xl === 1 ?
+			exp : (console.error(new SyntaxError('Nesting value must be specified alone.')), ParseHelper.syntaxError);
 		
-		//i = -1;
-		//while (++i < parsedLength && !(p = parsed[i])[nests]);
-		//if (i < parsedLength) return parsedLength === 1 ?
-		//	 p : (console.error(new SyntaxError('Nesting value must be specified alone.')), syntaxError);
-		if ((p = parsed[0])[nests]) return parsedLength === 1 ?
-			p : (console.error(new SyntaxError('Nesting value must be specified alone.')), syntaxError);
+		i = (xl = exp.length);
+		while (--i > -1) {
+			typeof (x = exp[i]) === 'function' ?
+				i += 2 :
+				Array.isArray(x) && (
+						typeof (x0 = exp[i0 = i - 1]) === 'function' ?
+							(exp.splice(i0, 2, x0(...x)), --xl) : ((l = x.length) ? (exp[i++] = x[l - 1]) : undefined)
+					)
+		}
 		
-		const l = opsPrecedence.length, splice = Array.prototype.splice;
-		let i0,li,ri, op,v, lp, spliceArgsLength, sym,cb,hasCb;
-		
-		i = -1, lp = parsedLength - 1;
-		while (++i < l) {
+		i = -1, xl0 = xl - 1;
+		while (++i < ol) {
 			
-			i0 = -1, sym = (op = opsPrecedence[i]).sym, hasCb = typeof (cb = op.callback) === 'function';
-			while (++i0 < parsedLength) {
-				
-				if ((p = parsed[i0]) !== sym) continue;
-				
-				v = hasCb ?	cb(
-									p,
-									(li = i0 > 0 ? i0 - 1 : null) === null ? li : parsed[li],
-									(ri = i0 === lp ? null : i0 + 1) === null? ri : parsed[ri],
-									i0, li, ri,
-									...arguments
-								) :
-								(parsed[i0] = cb),
-				
-				v?.[splices] &&	(
-											splice.call(parsed, ...v),
-											i0 = (v[0] + (spliceArgsLength = v.slice(2).length)) - 1,
-											lp = (parsedLength -= v[1] - spliceArgsLength) - 1
-										)
-				
-			}
+			sym = (op = opsPrecedence[i]).sym, cb = op.callback;
+			while ((i0 = exp.indexOf(sym)) !== -1)
+					v =	cb(
+								exp[li = i0],
+								i0 ? exp[--li] : bound,
+								(ri = i0 + 1) === xl ? bound : exp[ri],
+								i0, li, ri,
+								exp, ...args
+							),
+					v?.[splices] &&	(
+												splice.call(exp, ...v),
+												i0 = (v[0] + (spliceArgsLength = v.slice(2).length)) - 1,
+												xl0 = (xl -= v[1] - spliceArgsLength) - 1
+											),
+					v?.[cursor] &&	(i += v[cursor]);
 			
 		}
 		
-		return parsedLength === 1 ?	parsed[0] :
-												(console.error(new SyntaxError('Failed to parse an agument.')), syntaxError);
+		return xl === 1 ? exp[0] : (console.error(new SyntaxError('Failed to parse an agument.')), ParseHelper.syntaxError);
 		
 	}
+	[ParseHelper.after](parsed, parsedLength, plot, plotLength, input, detail, self) {
+		
+		if (parsed.indexOf(ParseHelper.syntaxError) !== -1) return ParseHelper.syntaxError;
+		
+		const { cmm } = StringsExpression[ParseHelper.symbol];
+		let startIndex, lastIndex, splicedLength;
+		
+		// 各種位置を決める流れが正確に把握できていないため、問題が起きた場合はここを確認する。
+		// 現状トライアンドエラーの結果、とりあえず動作要件を満たしたものを採用している。
+		startIndex = 0;
+		while (startIndex < parsedLength)	parsed.splice(
+																startIndex,
+																splicedLength = ((lastIndex = parsed.indexOf(cmm, startIndex)) === -1 ? (lastIndex = parsedLength) : lastIndex + 1) - startIndex,
+																this.express(parsed.slice(startIndex, lastIndex), arguments)
+															),
+														parsedLength -= --splicedLength,
+														startIndex = lastIndex - splicedLength + 1;
+		
+		return parsed;
+		
+	}
+	
+	//[ParseHelper.after](parsed, parsedLength, plot, plotLength, input, detail, self) {
+	//	
+	//	const	{ nests } = StringsExpression, { opsPrecedence, splices } = StringsExpressionCore,
+	//			syntaxError = ParseHelper.syntaxError;
+	//	let i,p;
+	//	
+	//	if (parsed.indexOf(syntaxError) !== -1) return syntaxError;
+	//	
+	//	if ((p = parsed[0])[nests]) return parsedLength === 1 ?
+	//		p : (console.error(new SyntaxError('Nesting value must be specified alone.')), syntaxError);
+	//	
+	//	const l = opsPrecedence.length, splice = Array.prototype.splice;
+	//	let i0,li,ri, op,v, lp, spliceArgsLength, sym,cb,hasCb;
+	//	
+	//	i = -1, lp = parsedLength - 1;
+	//	while (++i < l) {
+	//		
+	//		i0 = -1, sym = (op = opsPrecedence[i]).sym, hasCb = typeof (cb = op.callback) === 'function';
+	//		while (++i0 < parsedLength) {
+	//			
+	//			if ((p = parsed[i0]) !== sym) continue;
+	//			
+	//			v = hasCb ?	cb(
+	//								p,
+	//								(li = i0 > 0 ? i0 - 1 : null) === null ? li : parsed[li],
+	//								(ri = i0 === lp ? null : i0 + 1) === null? ri : parsed[ri],
+	//								i0, li, ri,
+	//								...arguments
+	//							) :
+	//							(parsed[i0] = cb),
+	//			
+	//			v?.[splices] &&	(
+	//										splice.call(parsed, ...v),
+	//										i0 = (v[0] + (spliceArgsLength = v.slice(2).length)) - 1,
+	//										lp = (parsedLength -= v[1] - spliceArgsLength) - 1
+	//									)
+	//			
+	//		}
+	//		
+	//	}
+	//	
+	//	return parsedLength === 1 ?	parsed[0] :
+	//											(console.error(new SyntaxError('Failed to parse an agument.')), syntaxError);
+	//	
+	//}
 	
 }
 
