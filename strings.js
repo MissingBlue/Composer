@@ -1299,7 +1299,7 @@ export class Strings {
 		
 		this.options = {
 			
-			echo(numbers, separator) {
+			dup(numbers, separator) {
 				
 				this[Composer.repetition] = Number.isNaN(numbers = +numbers|0) ? 1 : Math.max(numbers, 0),
 				this[Composer.separator] = separator;
@@ -1329,7 +1329,7 @@ export class Strings {
 																		}),
 		
 		this.optionsSeparator = new Chr(/[\s\t]+/g),
-		this.optionsMasks = this.exp[es.cll],
+		this.optionsMasks = this.exp[es.grp],
 		
 		this.desc = desc instanceof StringsDescriptor ? desc : new StringsDescriptor(),
 		
@@ -1427,19 +1427,6 @@ export class Strings {
 		
 	}
 	
-	//parseArgs(args, assigned) {
-	//	
-	//	const l = args.length, { nests } = StringsExpression, syntaxError = ParseHelper;
-	//	let i;
-	//	
-	//	i = -1;
-	//	while (++i < l && (args[i] = this.exp.get(args[i], assigned)) !== syntaxError)
-	//		args[i][nests] && (args[i] = this.get(args[i], assigned));
-	//	
-	//	return i < l ? syntaxError : args;
-	//	
-	//}
-	
 	evaluate(argStr, assigned) {
 		
 		const	args = this.exp.get(argStr, assigned), l = args.length,
@@ -1488,13 +1475,14 @@ export class StringsParser extends ParseHelper {
 			assign: '=',
 			suppressor: ';',
 			separator: ':',
+			disable: '!',
 			comma: new Chr(/[\n\s\t]*,[\n\s\t]*/g),
 			//space: new Chr(/[\n\s\t]+/g)
 		}).assignment =
-			new Chr(new RegExp(`[${Unit.escapeRegExpPattern(this.syx.suppressor + this.syx.separator)}]`, 'g'));
+			new Chr(new RegExp(`[${Unit.escapeRegExpPattern(this.syx.suppressor + this.syx.separator + this.syx.disable)}]`, 'g'));
 		
 		const	s = ParseHelper.setSymbols(this),
-				{ str,nest,evl,ref,arg, l, r, assign, suppressor, separator } = this.syx,
+				{ str,nest,evl,ref,arg, l, r, assign, suppressor, separator, disable } = this.syx,
 				assignment = this.syx.assignment;
 		
 		this[ParseHelper.precedenceDescriptors] = [
@@ -1550,14 +1538,17 @@ export class StringsParser extends ParseHelper {
 		
 		const pm = this.paramMask.getMasks(mask.inners[0]).masks;
 		
-		const	s = StringsParser[ParseHelper.symbol],
-				{ assign, comma, suppressor, space } = StringsParser.syx,
-				{ captor, splitted } = pm[0][0],
+		const { captor, splitted } = pm[0][0], { symbol, syx } = StringsParser, disable = syx.disable;
+		
+		if (disable instanceof RegExp ? disable.test(splitted[2][0]) : splitted[2][0] === disable) return '';
+		
+		const	s = StringsParser[symbol],
+				{ optionName, syntaxError } = StringsParser,
+				{ assign, comma, suppressor, space } = syx,
 				header = splitted[1].split(assign),
 				descriptor = header[0]?.trim?.(),
 				label = header.length > 1 ? header?.[1]?.trim?.() : null,
-				suppresses = suppressor instanceof RegExp ? suppressor.test(splitted[2][0]) : splitted[2][0] === suppressor,
-				{ optionName, syntaxError } = StringsParser;
+				suppresses = suppressor instanceof RegExp ? suppressor.test(splitted[2][0]) : splitted[2][0] === suppressor;
 		let i,l, options,opt, args, v;
 		
 		switch (captor) {
@@ -1619,334 +1610,15 @@ export class StringsParser extends ParseHelper {
 	
 }
 
-//export class StringsExpression extends ParseHelper {
-//	
-//	static eval(mask, masks, input, detail, self) {
-//		
-//		return { [StringsExpression.evaluated]: StringsExpression.getExecutor(mask.inners[0], 'assigned')(detail) };
-//		
-//	}
-//	static getExecutor(code, ...argNames) {
-//		
-//		return new Function(...argNames, code);
-//		
-//	}
-//	static nest(mask, masks, input, detail, self) {
-//		
-//		let v;
-//		
-//		(v = new String(mask.inners[0]))[StringsExpression.nests] = true;
-//		
-//		return v;
-//		
-//	}
-//	static call(mask, masks, input, detail, self) {
-//		
-//		const v = this.get(mask.inners[0], detail);
-//		
-//		return v;
-//		
-//	}
-//	static identify(mask, masks, input, detail, self) {
-//		
-//		let v;
-//		
-//		(v = new String(mask.inners[0]))[StringsExpression.identifies] = true;
-//		
-//		return v;
-//		
-//	}
-//	static space(mask, masks, input, detail, self) {
-//		
-//		return Term.deletes;
-//		
-//	}
-//	static comma(mask, masks, input, detail, self) {
-//		
-//		return this.symOf('cmm');
-//		
-//	}
-//	static stringify(v) {
-//		
-//		switch (typeof v) {
-//			case 'boolean': return v ? 'shin' : 'gi';
-//			case 'number': return ''+v;
-//			case 'function': return StringsExpression.stringify(v());
-//			case 'string': return `'${v}'`;
-//			case 'undefined': return 'hu';
-//			case 'object':
-//			if (Array.isArray(v)) {
-//				
-//				//if (v[StringsExpression.isGroup]) {
-//				//	
-//				//	const l = v.length, v0 = [], stringify = StringsExpression.stringify;
-//				//	let i;
-//				//	
-//				//	i = -1;
-//				//	while (++i < l) v0[i] = stringify(v[i]);
-//				//	return '(' + v0.join(',') + ')';
-//				//	
-//				//}
-//				//
-//				//return v;
-//				return v.length ? StringsExpression.stringify(v[v.length - 1]) : '';
-//				
-//			} else if (!v) {
-//				
-//				return 'nai';
-//				
-//			}
-//			default:
-//			return ParseHelper.syntaxError;
-//		}
-//		
-//	}
-//	
-//	static {
-//		
-//		this.nests = Symbol('StringsExpression.nests'),
-//		this.isGroup = Symbol('StringsExpression.isGroup'),
-//		this.identifies = Symbol('StringsExpression.identifies'),
-//		this.evaluated = Symbol('StringsExpression.evaluated'),
-//		this.anonAssignKey = Symbol('StringsExpression.anonAssignKey');
-//		
-//		this[ParseHelper.symbolNames] = [ 'spc', 'str', 'ref', 'evl', 'nst', 'cll', 'cmm' ];
-//		
-//		const	s = ParseHelper.setSymbols(this);
-//		
-//		this[ParseHelper.precedenceDescriptors] = [
-//			{ name: s.str, term: [ "'", "'" ], esc: null, unmasks: true },
-//			{ name: s.evl, term: [ '`', '`' ], esc: null, callback: StringsExpression.eval },
-//			{ name: s.nst, term: [ '<', '>' ], esc: null, callback: StringsExpression.nest },
-//			{ name: s.cll, term: [ '(', ')' ], esc: null, callback: StringsExpression.call },
-//			{ name: s.cmm, term: [ ',' ], esc: null, callback: StringsExpression.comma },
-//			{ name: s.spc, term: [ /[\n\s\t]+/g ], callback: StringsExpression.space }
-//		];
-//		
-//	}
-//	
-//	constructor(configuration, core) {
-//		
-//		super(configuration, StringsExpression);
-//		
-//		const s = StringsExpression[ParseHelper.symbol], ecs = StringsExpressionCore[ParseHelper.symbol];
-//		
-//		this.core = core instanceof StringsExpressionCore ?	core :
-//																				new StringsExpressionCore({
-//																					replacer: {
-//																						[Term.clones]: true,
-//																						[ ecs.str ]: this[s.str]
-//																					}
-//																				}),
-//		
-//		this[ParseHelper.escOwners] = [ this.paramMask, this.core ];
-//		
-//	}
-//	
-//	[ParseHelper.main](block, parsed, plot, plotLength, input, detail, self) {
-//		
-//		return block === ParseHelper.syntaxError ?
-//			(
-//				console.error(block, parsed, plot, input, new SyntaxError('Found an invalid argument.')),
-//				ParseHelper.syntaxError
-//			) :
-//			block;
-//		
-//	}
-//	
-//	[ParseHelper.after](parsed, parsedLength, plot, plotLength, input, detail, self) {
-//		
-//		const	core = this.core, comma = this.symOf('cmm'), values = [],
-//				{ anonAssignKey, evaluated, identifies, nests, stringify } = StringsExpression,
-//				syntaxError = ParseHelper.syntaxError;
-//		let i,i0,l0,vi, p,p0,pl0, beginIndex, v;
-//		
-//		i = vi = -1, beginIndex = 0, pl0 = parsedLength - 1;
-//		while (++i < parsedLength && (p = parsed[i]) !== syntaxError) {
-//			
-//			if (p instanceof String) {
-//				
-//				if (p[identifies]) {
-//					
-//					''+p || (p = anonAssignKey);
-//					
-//					if (typeof (p = detail?.[p]) === 'function' && Array.isArray(p0 = parsed[i + 1])) {
-//						
-//						if ((p = p(...p0)) === syntaxError) break;
-//						
-//						parsed.splice(i--, 2, p), pl0 = --parsedLength - 1;
-//							
-//					} else if ((parsed[i] = p) === syntaxError) break;
-//					
-//				} else parsed[i] = p;
-//				
-//			} else if (Array.isArray(p)) {
-//				
-//				parsed[i] = p.length ? p[p.length - 1] : '';
-//				
-//			} if (p && typeof p === 'object') {
-//				
-//				if (p[evaluated]) parsed[i] = p[evaluated];
-//				
-//			}
-//			//else if (p && typeof p === 'object') {
-//			//	
-//			//	parsed[i] = stringify((p = this.get(p.inners[0], detail)).length ? p[p.length - 1] : '');
-//			//	
-//			//} else break;
-//			
-//			if (p === comma || i === pl0) {
-//				
-//				if (
-//					(l0 = (v = parsed.slice(beginIndex, i === pl0 ? i + 1 : i)).length) === 1 &&
-//					(typeof v[0] !== 'string' || v[0][nests])
-//				) {
-//					
-//					v = v[0];
-//					
-//				} else {
-//					
-//					i0 = -1;
-//					while (
-//						++i0 < l0 &&
-//						(typeof v[i0] === 'string' || typeof (v[i0] = stringify(v[i0])) === 'string') &&
-//						!v[i0][nests]
-//					);
-//					if (i0 < l0 || (v = core.get(v.join(''))) === syntaxError) break;
-//					
-//				}
-//				
-//				values[++vi] = v, beginIndex = i + 1;
-//				
-//			}
-//			
-//		}
-//		
-//		return i === parsedLength ? values : syntaxError;
-//		
-//	}
-//	
-//}
 export class StringsExpression extends ParseHelper {
-	
-	static descriptor = {
-		
-		//nest(mask, masks, input, detail, self) {
-		//	
-		//	let v;
-		//	
-		//	(v = new String(mask.inners[0]))[StringsExpression.nests] = true;
-		//	
-		//	return v;
-		//	
-		//},
-		////coco StringsExpression での関数構文サポート
-		//call(mask, masks, input, detail, self) {
-		//	
-		//	// コメントの行は変更前の処理で、ネストする計算でエラーが起きていたが、
-		//	// ここに手を加えた覚えはないものの、戻り値の [0] を外すと動作するようになっている。またおかしくなった時はここを確認。
-		//	// 実際は手を加えた(恐らく StringsExpression.prototype.after の戻り値)が、ここが変更箇所のいくつかの呼び出し元のひとつであるため、
-		//	// 変更時に影響の確認を怠っていたものと思われる。
-		//	//return this.get(inner, detail)[0];
-		//	
-		//	const v = mask.inners[0]
-		//	
-		//	return this.get(v, detail);
-		//	
-		//},
-		
-		//eval(mask, masks, input, detail, self) {
-		//	return (new Function('labeled', mask.$))(detail);
-		//},
-		
-		//comma(mask, masks, input, detail, self) {
-		//	
-		//	return this[ParseHelper.symbol.cmm];
-		//	
-		//}
-		
-	};
-	//static keyword(mask, masks, input, detail, self) {
-	//	
-	//	const { dictionary, termSymbol } = StringsExpressionCore, k = mask.captor?.[termSymbol];
-	//	
-	//	return typeof k === 'symbol' ? k in dictionary ? dictionary[k] : k : ParseHelper.syntaxError;
-	//	
-	//	//return mask.captor?.[StringsExpressionCore.termSymbol] || ParseHelper.syntaxError;
-	//	
-	//}
-	
-	//static kwd(v, left, right, idx, ldx, rdx, parsed, parsedLength, plot, plotLength, input, detail, self) {
-	//	
-	//	switch (v) {
-	//		case 'nai': v = null; break;
-	//		case 'hu': v = undefined; break;
-	//		case 'shin': v = true; break;
-	//		case 'gi': v = false; break;
-	//		default: throw new SyntaxError(`Got an unknown keyword "${v}".`);
-	//	}
-	//	
-	//	return [ idx, 1, v ];
-	//	
-	//}
-	//static kwd(v, left, right, idx, ldx, rdx, parsed, parsedLength, plot, plotLength, input, detail, self) {
-	//	
-	//	switch (v) {
-	//		case 'nai': case 'null': v = null; break;
-	//		case 'hu': case 'undefined': v = undefined; break;
-	//		case 'shin': case 'true': v = true; break;
-	//		case 'gi': case 'false': v = false; break;
-	//		default: throw new SyntaxError(`Got an unknown keyword "${v}".`);
-	//	}
-	//	
-	//	return [ idx, 1, v ];
-	//	
-	//}
-	
-	//static {
-	//	
-	//	this.syntaxError = Symbol('StringsExpressionCore.syntaxError'),
-	//	this.nests = Symbol('StringsExpressionCore.nests'),
-	//	
-	//	this.opsSymbolNames = [ 'kwd', 'div', 'mul', 'sub', 'add' ],
-	//	this[ParseHelper.symbolNames] = [
-	//		'str', 'nst', 'cll', 'evl', 'num', 'idt', 'ops', 'spc', ...this.opsSymbolNames
-	//	];
-	//	
-	//	const	s = ParseHelper.setSymbols(this),
-	//			opsPrecedence = this.opsPrecedence = [
-	//				{ sym: s.kwd, callback: StringsExpressionCore.nai, kw: [ 'nai', 'hu', 'shin', 'gi' ] },
-	//				{ sym: s.div, callback: StringsExpressionCore.div, kw: [ '/' ] },
-	//				{ sym: s.mul, callback: StringsExpressionCore.mul, kw: [ '*' ] },
-	//				{ sym: s.sub, callback: StringsExpressionCore.sub, kw: [ '-' ] },
-	//				{ sym: s.add, callback: StringsExpressionCore.add, kw: [ '+' ] }
-	//			],
-	//			l = opsPrecedence.length;
-	//	let i,i0,l0,oi,kw, ops;
-	//	
-	//	i = oi = -1, ops = [];
-	//	while (++i < l) {
-	//		i0 = -1, l0 = (kw = Array.isArray(kw = opsPrecedence[i].kw) ? [ ...kw ] : [ kw ]).length;
-	//		while (++i0 < l0) kw[i0] = Unit.escapeRegExpPattern(kw[i0]);
-	//		l0 && (ops[++oi] = kw.join('|'));
-	//	}
-	//	
-	//	this[ParseHelper.precedenceDescriptors] = [
-	//		{ name: s.str, term: [ "'", "'" ], callback: StringsExpressionCore.descriptor.string },
-	//		{ name: s.nst, term: [ '<', '>' ], callback: StringsExpressionCore.descriptor.nest },
-	//		{ name: s.cll, term: [ '(', ')' ], callback: StringsExpressionCore.descriptor.call },
-	//		{ name: s.evl, term: [ '`', '`' ], callback: StringsExpressionCore.descriptor.eval },
-	//		{ name: s.num, term: [ /\d+(?:\.\d+)?/g ], callback: StringsExpressionCore.descriptor.number },
-	//		{ name: s.idt, term: [ /[$A-Za-z_\u0080-\uFFFF][$\w\u0080-\uFFFF]*/g ], callback: StringsExpressionCore.descriptor.identify },
-	//		{ name: s.ops, term: [ new RegExp('(?:' + ops.join('|') + ')', 'g') ], callback: StringsExpressionCore.descriptor.ops },
-	//		{ name: s.spc, term: [ /[\n\s\t]+/g ], callback: StringsExpressionCore.descriptor.space }
-	//	];
-	//	
-	//}
-	
+
 	static group(mask, masks, input, detail, self) {
 		
-		return this.get(mask.inners[0], detail);
+		const v = this.get(mask.inners[0], detail);
+		
+		v[StringsExpression.isGroup] = true;
+		
+		return v;
 		
 	}
 	static eval(mask, masks, input, detail, self) {
@@ -1976,7 +1648,8 @@ export class StringsExpression extends ParseHelper {
 	}
 	static string(mask, masks, input, detail, self) {
 		
-		return new String(mask.inners[0]);
+		//return new String(mask.inners[0]);
+		return ''+mask.inners[0];
 		
 	}
 	static identify(mask, masks, input, detail, self) {
@@ -1985,24 +1658,6 @@ export class StringsExpression extends ParseHelper {
 			StringsExpression.anonAssignKey;
 		
 		return detail && typeof detail === 'object' ? k in detail ? detail[k] : undefined : undefined;
-		
-	}
-	// 変数の展開を StringsExpressionCore(sec) に一元化。
-	// 課題がいくつもあり、関数の実行を sec でする場合、グループ化演算子内部の評価を sec でする必要が出ることを意味するが、
-	// その際いったん StringsExpression に遡る必要が出てくるが、secから呼び出し元のseを辿る仕組みが存在しない。
-	// また、seからsecへグループ化演算子などの配列を渡す仕組みも存在しない。
-	// seでグループを検出したあとにそれを配列化して内部を評価後、評価された値を内部形式に変換した上でsecに渡す方法はあり得るが、
-	// 要素数に比例して処理コストが増大するため、可能であれば直に配列を渡したいが、seからsecへの値の受け渡しはパース対象となる文字列しかないため、
-	// secに配列の存在を示唆する方法が確実な方法が存在しない。例えば配列の位置を文字列内に何らかの形で埋め込んで、それを元にassignedに
-	// 指定された配列を参照する方法が考えられるが、どんな方法にせよ文字列だけでは一意性を確保できない。
-	// 検討: 文字列を String 化して、そこに配列を差し込むべき文字列位置を記録したプロパティを作る？この場合secの機能が単体で処理を完結できなくなる。
-	static _identify(mask, masks, input, detail, self) {
-		
-		let v;
-		
-		(v = new String(mask.inners[0]))[StringsExpression.identifies] = true;
-		
-		return v;
 		
 	}
 	
@@ -2064,6 +1719,7 @@ export class StringsExpression extends ParseHelper {
 		this.anonAssignKey = Symbol('StringsExpression.anonAssignKey'),
 		this.bound = Symbol('StringsExpression.bound'),
 		this.cursor = Symbol('StringsExpression.cursor'),
+		this.isGroup = Symbol('StringsExpression.isGroup'),
 		this.nests = Symbol('StringsExpression.nests'),
 		this.splices = Symbol('StringsExpression.splices'),
 		
@@ -2103,7 +1759,7 @@ export class StringsExpression extends ParseHelper {
 			{ name: s.nst, term: [ '<', '>' ], callback: StringsExpression.nest },
 			{ name: s.grp, term: [ '(', ')' ], callback: StringsExpression.group },
 			{ name: s.ref, term: [ '$[', ']' ], callback: StringsExpression.identify },
-			{ name: s.num, term: [ /-?\d+(?:\.\d+)?/g ], callback: StringsExpression.number },
+			{ name: s.num, term: [ /(-?(\d+(?:\.\d+)?|Infinity)|NaN)/g ], callback: StringsExpression.number },
 			{ name: s.nai, term: [ /(?:nai|null)/g ], callback: null },
 			{ name: s.hu, term: [ /(hu|undefined)/g ], callback: undefined },
 			{ name: s.shin, term: [ /(shin|true)/g ], callback: true },
@@ -2130,22 +1786,25 @@ export class StringsExpression extends ParseHelper {
 	
 	express(exp, args) {
 		
-		const	{ bound, cursor, nests, opsPrecedence, splices } = StringsExpression,
+		const	{ bound, cursor, isGroup, nests, opsPrecedence, splices } = StringsExpression,
 				ol = opsPrecedence.length,
 				splice = Array.prototype.splice,
 				{ cmm } = StringsExpression[ParseHelper.symbol];
 		let i,l,i0, x,x0, xl,xl0, op,v, li,ri, spliceArgsLength, sym,cb,hasCb;
 		
-		if (exp[0]?.[nests]) return xl === 1 ?
-			exp : (console.error(new SyntaxError('Nesting value must be specified alone.')), ParseHelper.syntaxError);
+		xl = exp.length;
 		
-		i = (xl = exp.length);
+		if (exp[0]?.[nests]) return xl === 1 ?
+			exp[0] : (console.error(new SyntaxError('Nesting value must be specified alone.')), ParseHelper.syntaxError);
+		
+		i = xl;
 		while (--i > -1) {
 			typeof (x = exp[i]) === 'function' ?
 				i += 2 :
 				Array.isArray(x) && (
 						typeof (x0 = exp[i0 = i - 1]) === 'function' ?
-							(exp.splice(i0, 2, x0(...x)), --xl) : ((l = x.length) ? (exp[i++] = x[l - 1]) : undefined)
+								(exp.splice(i0, 2, x0(...x)), --xl) :
+								x[isGroup] ? (l = x.length) ? (exp[i++] = x[l - 1]) : undefined : x
 					)
 		}
 		
@@ -2195,52 +1854,6 @@ export class StringsExpression extends ParseHelper {
 		
 	}
 	
-	//[ParseHelper.after](parsed, parsedLength, plot, plotLength, input, detail, self) {
-	//	
-	//	const	{ nests } = StringsExpression, { opsPrecedence, splices } = StringsExpressionCore,
-	//			syntaxError = ParseHelper.syntaxError;
-	//	let i,p;
-	//	
-	//	if (parsed.indexOf(syntaxError) !== -1) return syntaxError;
-	//	
-	//	if ((p = parsed[0])[nests]) return parsedLength === 1 ?
-	//		p : (console.error(new SyntaxError('Nesting value must be specified alone.')), syntaxError);
-	//	
-	//	const l = opsPrecedence.length, splice = Array.prototype.splice;
-	//	let i0,li,ri, op,v, lp, spliceArgsLength, sym,cb,hasCb;
-	//	
-	//	i = -1, lp = parsedLength - 1;
-	//	while (++i < l) {
-	//		
-	//		i0 = -1, sym = (op = opsPrecedence[i]).sym, hasCb = typeof (cb = op.callback) === 'function';
-	//		while (++i0 < parsedLength) {
-	//			
-	//			if ((p = parsed[i0]) !== sym) continue;
-	//			
-	//			v = hasCb ?	cb(
-	//								p,
-	//								(li = i0 > 0 ? i0 - 1 : null) === null ? li : parsed[li],
-	//								(ri = i0 === lp ? null : i0 + 1) === null? ri : parsed[ri],
-	//								i0, li, ri,
-	//								...arguments
-	//							) :
-	//							(parsed[i0] = cb),
-	//			
-	//			v?.[splices] &&	(
-	//										splice.call(parsed, ...v),
-	//										i0 = (v[0] + (spliceArgsLength = v.slice(2).length)) - 1,
-	//										lp = (parsedLength -= v[1] - spliceArgsLength) - 1
-	//									)
-	//			
-	//		}
-	//		
-	//	}
-	//	
-	//	return parsedLength === 1 ?	parsed[0] :
-	//											(console.error(new SyntaxError('Failed to parse an agument.')), syntaxError);
-	//	
-	//}
-	
 }
 
 export class StringsDescriptor {
@@ -2257,7 +1870,7 @@ export class StringsDescriptor {
 		
 		this.descriptor = {},
 		
-		this.register(...arguments);
+		arguments.length && this.register(...arguments);
 		
 	}
 	
@@ -2274,7 +1887,11 @@ export class StringsDescriptor {
 			i = -1;
 			while (++i < l) args[i] = parameter.args[i];
 			
-			v = Reflect.apply(descriptor[0], descriptor[1], [ ...args, ...descriptor[2] ]);
+			v = Reflect.apply(
+					descriptor[0],
+					descriptor[1],
+					descriptor[2]?.length ? [ ...descriptor[2], ...args ] : [ ...args ]
+				);
 			
 		} else v = descriptor;
 		
@@ -2338,7 +1955,7 @@ export class StringsDescriptor {
 		typeof callback === 'function' && (callback = [ callback, undefined ]);
 		
 		Array.isArray(callback) && typeof callback[0] === 'function' &&
-			(callback[2] = callback.slice(2), (this.descriptor[name] = callback)[StringsDescriptor.reflects] = true);
+			((this.descriptor[name] = callback)[StringsDescriptor.reflects] = true);
 		
 	}
 	
@@ -2348,7 +1965,7 @@ const strings = new Strings();
 export default strings.get.bind(strings);
 class Counter {
 	
-	static describe(from, to, value, pad, separator, parameter, assigned) {
+	static describe(from, to, value, pad, padString, parameter, assigned) {
 		
 		// 以下の this は、Composer で実行する時に、 Composer.exec in this で真を示す時に this[Composer.exec] に置き換えられる。
 		// 上の記述は謎だが、Composer.$ は、実行時に、生成する文字列を列挙する Array に置換される。
@@ -2357,7 +1974,7 @@ class Counter {
 		reflections[Composer.reflections] = true,
 		
 		Number.isNaN(typeof (pad = parseInt(pad))) || !pad ||
-			(reflections[1] = [ String.prototype[pad > 0 ? 'padStart' : 'padEnd'], Composer.$, [ Math.abs(pad), separator ] ]);
+			(reflections[1] = [ String.prototype[pad > 0 ? 'padStart' : 'padEnd'], Composer.$, [ Math.abs(pad), padString ] ]);
 		
 		return reflections;
 		
@@ -2438,22 +2055,29 @@ class Reflector {
 	// 上記記述子の指定内容は、name が示すメソッドに apply を通して反映される。
 	// メソッドの戻り値は values に追加されると同時に、後続のメソッドの実行対象にもなる。これは連続した文字列操作を想定した仕様。
 	// target が true の場合、戻り値ではなく、直近の実行対象が再利用される。
-	static describe(methodName, target, ...args) {
+	static describe(eachElement, method, target, ...args) {
 		
-		const reflection = [], reflections = [ reflection ];
+		const { $, each, reflections } = Composer, reflector = [], reflectors = [ reflector ];
 		
-		reflection[0] = methodName || 'toString',
-		reflection[1] = typeof target === 'boolean' ? (target || (reflection[Composer.each] = true), Composer.$) : target,
-		reflection[2] = args,
+		reflector[0] = method || 'toString',
+		reflector[1] = target ?? $,
+		reflector[2] = args,
 		
-		reflections[Composer.reflections] = true;
+		(eachElement || reflector[1] === $) && (reflector[each] = reflector[1] === $),
+		reflectors[reflections] = true;
 		
-		return reflections;
+		return reflectors;
+		
+	}
+	static {
+		
+		this.describe[StringsDescriptor.variadic] = true;
 		
 	}
 	
 }
-strings.register([ '@', 'app' ], [ Reflector.describe, Reflector ]);
+strings.register([ '@', 'app' ], [ Reflector.describe, Reflector, [ false ] ]),
+strings.register([ '@@', 'apps' ], [ Reflector.describe, Reflector, [ true ] ]);
 
 class Inline {
 	
@@ -2473,32 +2097,11 @@ class Inline {
 }
 strings.register([ 'I' ], [ Inline.describe, Inline ]);
 
-class Echo {
+class Duplicator {
 	
-	//static describe(numbers, separator, strings) {
-	//	
-	//	const	args = this.or.split(inner, ...this.frkArgHierarchy.getMasks(inner).masks),
-	//			hasOpts = args.length > 1,
-	//			arg = hasOpts ? args[1] : args[0],
-	//			opts = hasOpts ? this.getArgs(args[0], detail, this.argHierarchy) : null,
-	//			l = opts?.[0] ?? 1,
-	//			separator = opts?.[1],
-	//			l0 = l - 1;
-	//	let i,ai, v, arg0, parser;
-	//	
-	//	i = ai = -1;
-	//	while (++i < l) {
-	//		arg0 = this.el.replace(this.eI.replace(this.ei.replace(arg, i), i + 1), l),
-	//		(v = (parser = this.getParser(arg0, detail)).next()).done ?
-	//			(splice[++ai] = v.value) : (ai = splice.push(...parser.next().value) - 1),
-	//		separator && i < l0 && (splice[++ai] = separator);
-	//	}
-	//	
-	//}
-	
-	static describe(numbers, separator, strings) {
+	static describe(strings, numbers, separator) {
 		
-		const	reflections = [ [ Echo.echo, Composer.$, [ numbers, separator, strings ] ] ];
+		const	reflections = [ [ Duplicator.duplicate, Composer.$, [ strings, numbers, separator ] ] ];
 		
 		reflections[Composer.reflections] = true;
 		
@@ -2506,29 +2109,14 @@ class Echo {
 		
 	}
 	
-	static echo(numbers, separator, strings) {
+	static duplicate(strings, numbers, separator) {
 		
 		this.push(...strings), this[Composer.repetition] = numbers, this[Composer.separator] = separator;
 		
 	}
 	
-	//l = Number.isNaN(numbers = (numbers ?? 1)|0) ? 0 : numbers < 0 ? 0 : numbers,
-	//			separator = separator ?? '',
-	//			l0 = l - 1;
-	//	let i,ai, v, arg0, parser;
-	//	
-	//	i = ai = -1;
-	//	while (++i < l) {
-	//		arg0 = this.el.replace(this.eI.replace(this.ei.replace(arg, i), i + 1), l),
-	//		(v = (parser = this.getParser(arg0, detail)).next()).done ?
-	//			(splice[++ai] = v.value) : (ai = splice.push(...parser.next().value) - 1),
-	//		separator && i < l0 && (splice[++ai] = separator);
-	//	}
-	//	
-	//}
-	
 }
-strings.register([ '^', 'echo' ], [ Echo.describe, Echo ]);
+strings.register([ '^', 'dup' ], [ Duplicator.describe, Duplicator ]);
 
 class Selector {
 	
@@ -2831,8 +2419,8 @@ export class Composer {
 	}
 	static *getComposer(parts) {
 		
-		let	i,i0,l0,i1,l1,pi,pl,
-				p, nodes,propertyName, composed, suppresses, source, resolver, every,backwards, compose, values;
+		let	i,i0,l0,i1,l1,pi,pl, p, v,
+				nodes,propertyName, composed, suppresses, source, resolver, every,backwards, compose, values, method;
 		const	l = (Array.isArray(parts) ? parts : (parts = [ parts ])).length, URLs = [],
 				snapshots = [], sources = [],
 				{ rejectedPromise } = this,
@@ -2892,13 +2480,26 @@ export class Composer {
 						i0 = -1, l0 = p.v.length;
 						while (++i0 < l0) {
 							
-							if (p.v[i0][Composer.each]) {
+							if (Composer.each in p.v[i0]) {
 								
-								i1 = -1, l1 = values.length;
-								while (++i1 < l1)
-									values[i1] = Reflect.apply(...Composer.replaceValue(p.v[i0], Composer.$, values[i1]));
+								if (p.v[i0][Composer.each]) {
+									
+									i1 = -1, l1 = values.length;
+									while (++i1 < l1)
+										v = Composer.replaceValue(p.v[i0], Composer.$, values[i1]),
+										values[i1] = Reflect.apply(typeof v[0] === 'function' ? v[0] : v[1][v[0]], v[1], v[2]);
+									
+								} else if (typeof p.v[i0]?.[1][Symbol.iterator] === 'function') {
+									
+									i1 = -1, method = p.v[i0][0];
+									for (v of p.v[i0][1][Symbol.iterator]())
+										values[++i1] =
+											Reflect.apply(typeof method === 'function' ? method : v[method], v, p.v[i0][2]);
+									
+								}
 								
-							} else Reflect.apply(...Composer.replaceValue(p.v[i0], Composer.$, values));
+							} else	v = Composer.replaceValue(p.v[i0], Composer.$, values),
+										values[0] = Reflect.apply(typeof v[0] === 'function' ? v[0] : v[1][v[0]], v[1], v[2]);
 							
 						}
 						
