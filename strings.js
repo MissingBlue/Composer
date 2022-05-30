@@ -13,14 +13,6 @@ export class Indexer {
 		this.cache = {};
 		
 	}
-	clearCache() {
-		
-		const cache = this.cache;
-		let k;
-		
-		for (k in cache) delete cache[k];
-		
-	}
 	// キャッシュされる値は matchAll の戻り値である配列内の要素をそのまま使う。
 	// すべての要素にはプロパティ input があり、これは一致検索の文字列全体を示す。
 	// つまり各要素の input は重複しており、仮にその文字列が非常に巨大だった場合、リソースに負荷を与えることが予想される。
@@ -28,11 +20,12 @@ export class Indexer {
 	// ただし、単純に削除した場合、出力から入力を復元することができなくなる点に留意が必要。
 	setCache(matched, handler) {
 		
-		const cache = this.cache, input = matched[0]?.input, { indexed, lastIndex } = Indexer;
+		const cache = this.cache, input = matched[0]?.input || Indexer.anon;
 		
 		if (!(input in cache)) {
 			
-			const	v = (cache[input] = matched)[indexed] = [], l = matched.length, handles = typeof handler === 'function';
+			const	{ indexed, lastIndex } = Indexer,
+					v = (cache[input] = matched)[indexed] = [], l = matched.length, handles = typeof handler === 'function';
 			let i,i0, m;
 			
 			i = i0 = -1;
@@ -45,15 +38,22 @@ export class Indexer {
 		
 	}
 	getCache(str) {
+		
 		return this.cache?.[str ?? Indexer.anon];
+		
+	}
+	clearCache() {
+		
+		const cache = this.cache;
+		let k;
+		
+		for (k in cache) delete cache[k];
+		
 	}
 	
 }
 export class Unit extends Indexer {
 	
-	// https://qiita.com/HMMNRST/items/4b10dfb621a469034257#-%E5%90%A6%E5%AE%9A%E5%85%88%E8%AA%AD%E3%81%BF
-	static unit = /(?!)/g;
-	static flags = 'g';
 	static escapeRegExpPattern(pattern) {
 		// https://developer.mozilla.org/ja/docs/Web/JavaScript/Guide/Regular_Expressions#escaping
 		return pattern.replace(/[.*+?^=!:${}()|[\]\/\\]/g, '\\$&');
@@ -74,6 +74,11 @@ export class Unit extends Indexer {
 		return rx;
 		
 	}
+	static {
+		// https://qiita.com/HMMNRST/items/4b10dfb621a469034257#-%E5%90%A6%E5%AE%9A%E5%85%88%E8%AA%AD%E3%81%BF
+		this.unit = /(?!)/g,
+		this.flags = 'g';
+	}
 	
 	constructor(unit, flags) {
 		
@@ -82,14 +87,40 @@ export class Unit extends Indexer {
 		this.setUnit(unit, flags);
 		
 	}
+	
 	setUnit(unit, flags) {
 		
 		const last = this.unit;
 		
-		unit = unit instanceof Unit ? unit.unit : Unit.createRegExpG(unit, flags),
-		(last instanceof RegExp && last.flags === unit.flags && last.source === unit.source) || this.clearCache();
+		unit = unit instanceof Unit ? unit.unit : Unit.createRegExpG(unit, flags);
+		
+		(last instanceof RegExp ? last.flags === unit.flags && last.source === unit.source : last !== unit) &&
+			this.clearCache();
 		
 		return this.unit = unit;
+		
+	}
+	
+}
+export class Word {
+	
+	static w = Symbol('Word.w');
+	
+	constuctor(str) {
+		
+		this.w = str;
+		
+	}
+	
+	set w(str) {
+		
+		// https://developer.mozilla.org/ja/docs/Web/JavaScript/Guide/Regular_Expressions#escaping
+		this[Word.w] = ('' + (str ?? '')).replace(/[.*+?^=!:${}()|[\]\/\\]/g, '\\$&');
+		
+	}
+	get w() {
+		
+		return this[Word.w] ?? '';
 		
 	}
 	
@@ -199,8 +230,8 @@ export class Sequence extends Unit {
 		let i,m,lm, replaced;
 		
 		i = -1, replaced = '';
-		while (++i < l) replaced += str.substring(lm ? lm.index + lm[0].length : 0, (m = matched[i]).index) +
-			('sequence' in (lm = m) ? m[0].substring(0, m[0].length / m.sequence) : m[0].replaceAll(u, replacer));
+		while (++i < l) replaced += str.substring(lm ? lm.index + lm[0].length : 0,
+			(m = matched[i]).index) + ('sequence' in (lm = m) ? m[0].substring(0, m[0].length / m.sequence) : m[0].replaceAll(u, replacer));
 		
 		return replaced += lm ? str.substring(lm.index + lm[0].length) : str;
 		
@@ -762,12 +793,6 @@ export class Term extends Array {
 // Term は汎用性を意識しているが、Terms は ParseHelper のサブセット的な存在で、それ単体では意味をなさないプロパティやメソッドは多い。
 export class Terms extends Array {
 	
-	static termIndex = Symbol('Terms.termIndex');
-	static unmasks = Symbol('Terms.unmasks');
-	static callback = Symbol('Terms.callback');
-	static deletes = Symbol('Terms.deletes');
-	static splices = Symbol('Terms.splices');
-	
 	// 内部処理用の関数で、第二引数 source に与えられた配列の中から、第一引数 v に一致する要素の位置を再帰して取得する。
 	// 戻り値は一致した v を列挙する配列で、その配列の、シンボル Terms.termIndex が示すプロパティに v の位置が指定される。
 	static recursiveGet(v, source = this) {
@@ -790,18 +815,17 @@ export class Terms extends Array {
 		return v0 && v0;
 		
 	}
-	// 内部処理用の関数で、第一引数 callback に指定した値が適切な値であれば、
-	// それを基にして Reflect.apply に指定する引数を順に列挙する配列を返す。
-	//static normalizeTermCallback(callback) {
-	//	
-	//	typeof callback === 'function' && (callback = [ callback ]);
-	//	
-	//	return Array.isArray(callback) && typeof callback[0] === 'function' &&
-	//		(callback.length > 1 && !Array.isArray(callback[2]) && (callback[2] = [ callback[2] ]), callback);
-	//	
-	//}
 	
-	//constructor(precedence, esc, defaultThis, replaceDescriptor) {
+	static {
+		
+		this.termIndex = Symbol('Terms.termIndex'),
+		this.unmasks = Symbol('Terms.unmasks'),
+		this.callback = Symbol('Terms.callback'),
+		this.deletes = Symbol('Terms.deletes'),
+		this.splices = Symbol('Terms.splices');
+		
+	}
+	
 	constructor(configuration) {
 		
 		//this.super = [],
@@ -1368,7 +1392,7 @@ export class Strings {
 				
 			}
 			
-			p.suppressed && (p = p.suppressed);
+			p.muted && (p = p.muted);
 			
 			if (Array.isArray(opts = p.options)) {
 				
@@ -1458,7 +1482,6 @@ export class StringsParser extends ParseHelper {
 		// str = string, nst = nest, ref = reference, blk = block
 		this[ParseHelper.symbolNames] = [
 			'str', 'nst',
-			//'arg',
 			'ref', 'syx', 'sys', 'syl',
 			're', 'evl', 'fnc', 'dom', 'amp', 'frk', 'ech', 'clc',
 			'backwards', 'every'
@@ -1469,20 +1492,19 @@ export class StringsParser extends ParseHelper {
 			nest: [ '<', '>' ],
 			evl: [ '`', '`' ],
 			ref: [ '$[', ']' ],
-			//arg: [ '(', ')' ],
 			l: '[',
 			r: ']',
 			assign: '=',
-			suppressor: ';',
+			mute: ';',
 			separator: ':',
 			disable: '!',
 			comma: new Chr(/[\n\s\t]*,[\n\s\t]*/g),
 			//space: new Chr(/[\n\s\t]+/g)
 		}).assignment =
-			new Chr(new RegExp(`[${Unit.escapeRegExpPattern(this.syx.suppressor + this.syx.separator + this.syx.disable)}]`, 'g'));
+			new Chr(new RegExp(`[${Unit.escapeRegExpPattern(this.syx.mute + this.syx.separator + this.syx.disable)}]`, 'g'));
 		
 		const	s = ParseHelper.setSymbols(this),
-				{ str,nest,evl,ref,arg, l, r, assign, suppressor, separator, disable } = this.syx,
+				{ str,nest,evl,ref,arg, l, r, assign, mute, separator, disable } = this.syx,
 				assignment = this.syx.assignment;
 		
 		this[ParseHelper.precedenceDescriptors] = [
@@ -1544,11 +1566,11 @@ export class StringsParser extends ParseHelper {
 		
 		const	s = StringsParser[symbol],
 				{ optionName, syntaxError } = StringsParser,
-				{ assign, comma, suppressor, space } = syx,
+				{ assign, comma, mute, space } = syx,
 				header = splitted[1].split(assign),
 				descriptor = header[0]?.trim?.(),
 				label = header.length > 1 ? header?.[1]?.trim?.() : null,
-				suppresses = suppressor instanceof RegExp ? suppressor.test(splitted[2][0]) : splitted[2][0] === suppressor;
+				mutes = mute instanceof RegExp ? mute.test(splitted[2][0]) : splitted[2][0] === mute;
 		let i,l, options,opt, args, v;
 		
 		switch (captor) {
@@ -1565,7 +1587,7 @@ export class StringsParser extends ParseHelper {
 		
 		v = { descriptor, label, options, args, source: mask.$ };
 		
-		return suppresses ? { suppressed: v } : v;
+		return mutes ? { muted: v } : v;
 		
 	}
 	
@@ -1724,53 +1746,71 @@ export class StringsExpression extends ParseHelper {
 		this.splices = Symbol('StringsExpression.splices'),
 		
 		this[ParseHelper.symbolNames] = [
-			'grp',
-			'evl',
-			'nst',
-			'str',
-			'ref',
-			'cmm',
-			'num',
-			'nai',
-			'hu',
-			'shin',
-			'gi',
-			'idt',
-			'div',
-			'mul',
-			'sub',
 			'add',
-			'spc'
+			'cmm',
+			'div',
+			'evl',
+			'gi',
+			'grp',
+			'hu',
+			'idt',
+			'nai',
+			'nst',
+			'num',
+			'mul',
+			'ref',
+			'shin',
+			'spc',
+			'str',
+			'sub',
 		];
 		
-		const s = ParseHelper.setSymbols(this);
+		const	{
+					add,
+					cmm,
+					div,
+					evl,
+					gi,
+					grp,
+					hu,
+					idt,
+					mul,
+					nai,
+					nst,
+					num,
+					ref,
+					shin,
+					spc,
+					str,
+					sub
+				} = ParseHelper.setSymbols(this);
 		
 		this.opsPrecedence = [
-			{ sym: s.div, callback: StringsExpression.div },
-			{ sym: s.mul, callback: StringsExpression.mul },
-			{ sym: s.sub, callback: StringsExpression.sub },
-			{ sym: s.add, callback: StringsExpression.add }
+			{ sym: div, callback: StringsExpression.div },
+			{ sym: mul, callback: StringsExpression.mul },
+			{ sym: sub, callback: StringsExpression.sub },
+			{ sym: add, callback: StringsExpression.add }
 		],
 		
 		this[ParseHelper.precedenceDescriptors] = [
 			
-			{ name: s.str, term: [ "'", "'" ], callback: StringsExpression.string },
-			{ name: s.evl, term: [ '`', '`' ], callback: StringsExpression.eval },
-			{ name: s.nst, term: [ '<', '>' ], callback: StringsExpression.nest },
-			{ name: s.grp, term: [ '(', ')' ], callback: StringsExpression.group },
-			{ name: s.ref, term: [ '$[', ']' ], callback: StringsExpression.identify },
-			{ name: s.num, term: [ /(-?(\d+(?:\.\d+)?|Infinity)|NaN)/g ], callback: StringsExpression.number },
-			{ name: s.nai, term: [ /(?:nai|null)/g ], callback: null },
-			{ name: s.hu, term: [ /(hu|undefined)/g ], callback: undefined },
-			{ name: s.shin, term: [ /(shin|true)/g ], callback: true },
-			{ name: s.gi, term: [ /(gi|false)/g ], callback: false },
-			{ name: s.idt, term: [ /[$A-Za-z_\u0080-\uFFFF][$\w\u0080-\uFFFF]*/g ], callback: StringsExpression.identify },
-			{ name: s.cmm, term: [ ',' ], callback: s.cmm },
-			{ name: s.div, term: [ '/' ], callback: s.div },
-			{ name: s.mul, term: [ '*' ], callback: s.mul },
-			{ name: s.sub, term: [ '-' ], callback: s.sub },
-			{ name: s.add, term: [ '+' ], callback: s.add },
-			{ name: s.spc, term: [ /[\n\s\t]+/g ], callback: Term.deletes }
+			{ name: str, term: [ "'", "'" ], callback: StringsExpression.string },
+			{ name: evl, term: [ '`', '`' ], callback: StringsExpression.eval },
+			{ name: nst, term: [ '<', '>' ], callback: StringsExpression.nest },
+			{ name: grp, term: [ '(', ')' ], callback: StringsExpression.group },
+			{ name: ref, term: [ '$[', ']' ], callback: StringsExpression.identify },
+			{ name: num, term: [ /(-?(\d+(?:\.\d+)?|Infinity)|NaN)/g ], callback: StringsExpression.number },
+			{ name: nai, term: [ /(?:nai|null)/g ], callback: null },
+			{ name: hu, term: [ /(hu|undefined)/g ], callback: undefined },
+			{ name: shin, term: [ /(shin|true)/g ], callback: true },
+			{ name: gi, term: [ /(gi|false)/g ], callback: false },
+			{ name: idt, term: [ /[$A-Za-z_\u0080-\uFFFF][$\w\u0080-\uFFFF]*/g ], callback: StringsExpression.identify },
+			{ name: cmm, term: [ ',' ], callback: cmm },
+			{ name: div, term: [ '/' ], callback: div },
+			{ name: mul, term: [ '*' ], callback: mul },
+			{ name: sub, term: [ '-' ], callback: sub },
+			{ name: add, term: [ '+' ], callback: add },
+			{ name: spc, term: [ /[\n\s\t]+/g ], callback: Term.deletes }
 			
 		];
 		
@@ -2032,7 +2072,7 @@ class Counter {
 			
 		}
 		
-		return this;
+		return Composer.noReturnValue;
 		
 	}
 	
@@ -2112,6 +2152,8 @@ class Duplicator {
 	static duplicate(strings, numbers, separator) {
 		
 		this.push(...strings), this[Composer.repetition] = numbers, this[Composer.separator] = separator;
+		
+		return Composer.noReturnValue;
 		
 	}
 	
@@ -2304,8 +2346,9 @@ export class Composer {
 		this.reflections = Symbol('Composer.reflections'),
 		this.reflection = Symbol('Composer.reflection'),
 		this.each = Symbol('Composer.each'),
+		this.noReturnValue = Symbol('Composer.noReturnValue'),
 		
-		this.suppressed = Symbol('Composer.suppressed'),
+		this.muted = Symbol('Composer.muted'),
 		
 		this.rejectedPromise = Symbol('Composer.rejectedPromise'),
 		
@@ -2420,10 +2463,14 @@ export class Composer {
 	static *getComposer(parts) {
 		
 		let	i,i0,l0,i1,l1,pi,pl, p, v,
-				nodes,propertyName, composed, suppresses, source, resolver, every,backwards, compose, values, method;
-		const	l = (Array.isArray(parts) ? parts : (parts = [ parts ])).length, URLs = [],
+				composed, mutes, source, resolver, every,backwards, compose, values, method;
+		const	l = (Array.isArray(parts) ? parts : (parts = [ parts ])).length,
 				snapshots = [], sources = [],
-				{ rejectedPromise } = this,
+				{ reflect, reflections, rejectedPromise, repetition, selectiveCopyProperties, separator, valuesOptions } =
+					this,
+				{ isNaN } = Number,
+				{ max } = Math,
+				{ isArray } = Array,
 				promise = new Promise(rs => resolver = rs),
 				promised = (v, promise, snapshot, source) => {
 					
@@ -2439,11 +2486,7 @@ export class Composer {
 							resolver()
 						);
 					
-				},
-				{ repetition, separator, valuesOptions } = Composer,
-				vol = valuesOptions.length,
-				numIsNaN = Number.isNaN,
-				max = Math.max;
+				};
 		
 		i = -1, pi = pl = 0, composed = [];
 		while (++i < l) {
@@ -2452,78 +2495,22 @@ export class Composer {
 			
 			switch (typeof (p = parts[i])) {
 				
-				case 'object':
+				case 'object': case 'undefined':
 				
 				if (!p) continue;
 				
-				if (suppresses = 'suppressed' in p) {
-					
-					values.push(...Composer.compose([ p.suppressed ]));
-					
-					break;
-					
-				}
-				
-				//if (Array.isArray(p)) {
-				//	
-				//	i0 = -1, l0 = p.length;
-				//	while (++i0 < l0) Composer.concat(Composer.compose(p[i0]), values);
-				//	
-				//	break;
-				//	
-				//}
-				
-				if (Array.isArray(p.v)) {
-					
-					if (p.v[Composer.reflections]) {
-						
-						i0 = -1, l0 = p.v.length;
-						while (++i0 < l0) {
-							
-							if (Composer.each in p.v[i0]) {
-								
-								if (p.v[i0][Composer.each]) {
-									
-									i1 = -1, l1 = values.length;
-									while (++i1 < l1)
-										v = Composer.replaceValue(p.v[i0], Composer.$, values[i1]),
-										values[i1] = Reflect.apply(typeof v[0] === 'function' ? v[0] : v[1][v[0]], v[1], v[2]);
-									
-								} else if (typeof p.v[i0]?.[1][Symbol.iterator] === 'function') {
-									
-									i1 = -1, method = p.v[i0][0];
-									for (v of p.v[i0][1][Symbol.iterator]())
-										values[++i1] =
-											Reflect.apply(typeof method === 'function' ? method : v[method], v, p.v[i0][2]);
-									
-								}
-								
-							} else	v = Composer.replaceValue(p.v[i0], Composer.$, values),
-										values[0] = Reflect.apply(typeof v[0] === 'function' ? v[0] : v[1][v[0]], v[1], v[2]);
-							
-						}
-						
-					} else values.push(...p.v);
-					
-				} else values[0] = p.v;
-				
-				i0 = -1;
-				while (++i0 < vol) p.hasOwnProperty(i1 = valuesOptions[i0]) && (values[i1] = p[i1]);
-				
-				//if (p.selector) {
-				//	
-				//	Composer.select(p.urls, p.selector, p.propertyName, p.rxSrc, p.interval, p.timeout, values);
-				//	
-				//} else if ('from' in p || 'to' in p || 'value' in p)
-				//	Composer.increase(p?.from ?? 0, p?.to ?? 1, p?.value ?? 1, values);
-				//
-				//Array.isArray(p[Composer.reflections]) && Composer.applyAll(p[Composer.reflections], values);
+				(mutes = 'muted' in p) ?
+					values.push(...Composer.compose([ p.muted ])) :
+					(
+						isArray(v = p.v) ? v[reflections] ? reflect(v, values) : values.push(...v) : (values[0] = v),
+						selectiveCopyProperties(values, p, valuesOptions)
+					);
 				
 				break;
 				
 				case 'number':
 				
-				snapshots[i] = sources[i] = p;
+				isNaN(p = p|0) || (p < 0 ? (p = l - p) < 0 : p >= l) || p === i || (snapshots[i] = sources[i] = p);
 				
 				continue;
 				
@@ -2531,17 +2518,16 @@ export class Composer {
 				
 			}
 			
-			//coco シンボルをコピーする処理で、異なる値に対して同じ処理を三ヶ所で行なっているが、メソッドを作成して共通化する。
-			i0 = -1, snapshots[i] = suppresses ? values : [ ...(sources[i] = values) ];
-			while (++i0 < vol) values.hasOwnProperty(i1 = valuesOptions[i0]) && (snapshots[i][i1] = values[i1]);
+			selectiveCopyProperties(snapshots[i] = mutes ? values : [ ...(sources[i] = values) ], values, valuesOptions),
 			
 			i0 = -1, l0 = values.length;
-			while (++i0 < l0) values[i0] instanceof Promise && (
+			while (++i0 < l0) (v = values[i0]) instanceof Promise && (
 					++pl,
-					values[i0].then(v => v).catch(error => (console.error(error), rejectedPromise)).then(((promise, ss, src) => v => promised(v, promise, ss, src))(values[i0], snapshots[i], sources[i]))
+					v.then(v => v).catch(error => (console.error(error), rejectedPromise)).
+						then(((promise, ss, src) => v => promised(v, promise, ss, src))(v, snapshots[i], sources[i]))
 				);
 			
-			values = suppresses = null;
+			values = mutes = null;
 			
 		}
 		
@@ -2552,31 +2538,63 @@ export class Composer {
 			
 			if (!(i in sources)) continue;
 			
-			if (typeof (source = sources[i]) === 'number') {
-				
-				if (!Array.isArray(values = snapshots[(every = (source = source|0) < 0) ? source * -1 : source])) continue;
-				
-				if (!every) {
-					
-					i0 = -1, source = [ ...values ];
-					while (++i0 < vol) values.hasOwnProperty(i1 = valuesOptions[i0]) && (source[i1] = values[i1]);
-					
-				}
-				
-			} else if (parts[i] && typeof parts[i] === 'object') {
-				
-				backwards = parts[i].backwards,
-				every = parts[i].every;
-				
-			}
+			typeof (source = sources[i]) === 'number' ? 
+				isArray(values = snapshots[(every = (source = source|0) < 0) ? source * -1 : source]) &&
+					(every || selectiveCopyProperties(source = [ ...values ], values, valuesOptions)) :
+				parts[i] && typeof parts[i] === 'object' &&
+					(backwards = parts[i].backwards, every = parts[i].every),
 			
-			i0 = -1, l0 = repetition in source ? numIsNaN(l0 = +source[repetition]|0) ? 1 : max(l0, 0) : 1,
+			i0 = -1, l0 = repetition in source ? isNaN(l0 = +source[repetition]|0) ? 1 : max(l0, 0) : 1,
 			compose = Composer[backwards ? 'everyReverse' : every ? 'every' : 'mix'];
 			while (++i0 < l0) composed = compose(composed, source, i0 ? source?.[separator] ?? '' : '');
 			
 		}
 		
 		return composed;
+		
+	}
+	static reflect(reflections, values) {
+		
+		const	{ $, each, noReturnValue, replaceValue } = Composer, { iterator } = Symbol, { apply } = Reflect,
+				l = reflections.length;
+		let i,i0,l0, v,r, method,itr, args;
+		
+		i = -1;
+		while (++i < l) {
+			
+			if (each in (r = reflections[i])) {
+				
+				if (r[each]) {
+					
+					i0 = -1, l0 = values.length;
+					while (++i0 < l0)
+						v = replaceValue(r, $, values[i0]),
+						values[i0] = apply(typeof v[0] === 'function' ? v[0] : v[1][v[0]], v[1], v[2]);
+					
+				} else if (typeof r?.[1][iterator] === 'function') {
+					
+					i0 = -1, method = r[0], itr = r[1][iterator](), args = r[2];
+					for (v of itr) values[++i0] = apply(typeof method === 'function' ? method : v[method], v, args);
+					
+				}
+				
+			} else	v = apply(typeof (v = replaceValue(r, $, values))[0] === 'function' ? v[0] : v[1][v[0]], v[1], v[2]),
+						v === noReturnValue || (values[0] = v);
+			
+		}
+		
+		return values;
+		
+	}
+	static selectiveCopyProperties(target, source, names) {
+		
+		const l = names.length;
+		let i,k;
+		
+		i = -1;
+		while (++i < l) source.hasOwnProperty(k = names[i]) && (target[k] = source[k]);
+		
+		return target;
 		
 	}
 	
