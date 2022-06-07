@@ -52,75 +52,174 @@ export class Indexer {
 	}
 	
 }
-export class Unit extends Indexer {
+//export class Unit extends Indexer {
+//	
+//	static escapeRegExpPattern(pattern) {
+//		// https://developer.mozilla.org/ja/docs/Web/JavaScript/Guide/Regular_Expressions#escaping
+//		return pattern.replace(/[.*+?^=!:${}()|[\]\/\\]/g, '\\$&');
+//		
+//	}
+//	static createRegExpG(rx = Unit.unit, flags = Unit.flags) {
+//		
+//		rx instanceof RegExp || (
+//			(rx && typeof rx === 'object') ||
+//				(rx = { pattern: Unit.escapeRegExpPattern(''+(rx || '')), unescapes: true, flags }),
+//			typeof (flags = 'flags' in rx ? rx.flags : flags) === 'string' ?
+//				flags.indexOf('g') === -1 && (flags += 'g') : (flags = 'g'),
+//			rx = new RegExp((rx?.unescapes ? rx?.pattern: Unit.escapeRegExpPattern(rx.pattern)) ?? Unit.unit, flags)
+//		);
+//		
+//		if (!rx.global) throw new TypeError('RegExp must be global.');
+//		
+//		return rx;
+//		
+//	}
+//	static {
+//		// https://qiita.com/HMMNRST/items/4b10dfb621a469034257#-%E5%90%A6%E5%AE%9A%E5%85%88%E8%AA%AD%E3%81%BF
+//		this.unit = /(?!)/g,
+//		this.flags = 'g';
+//	}
+//	
+//	constructor(unit, flags) {
+//		
+//		super(),
+//		
+//		this.setUnit(unit, flags);
+//		
+//	}
+//	
+//	setUnit(unit, flags) {
+//		
+//		const last = this.unit;
+//		
+//		unit = unit instanceof Unit ? unit.unit : Unit.createRegExpG(unit, flags);
+//		
+//		(last instanceof RegExp ? last.flags === unit.flags && last.source === unit.source : last !== unit) &&
+//			this.clearCache();
+//		
+//		return this.unit = unit;
+//		
+//	}
+//	
+//}
+export class Pattern {
 	
-	static escapeRegExpPattern(pattern) {
-		// https://developer.mozilla.org/ja/docs/Web/JavaScript/Guide/Regular_Expressions#escaping
-		return pattern.replace(/[.*+?^=!:${}()|[\]\/\\]/g, '\\$&');
-		
-	}
-	static createRegExpG(rx = Unit.unit, flags = Unit.flags) {
-		
-		rx instanceof RegExp || (
-			(rx && typeof rx === 'object') ||
-				(rx = { pattern: Unit.escapeRegExpPattern(''+(rx || '')), unescapes: true, flags }),
-			typeof (flags = 'flags' in rx ? rx.flags : flags) === 'string' ?
-				flags.indexOf('g') === -1 && (flags += 'g') : (flags = 'g'),
-			rx = new RegExp((rx?.unescapes ? rx?.pattern: Unit.escapeRegExpPattern(rx.pattern)) ?? Unit.unit, flags)
-		);
-		
-		if (!rx.global) throw new TypeError('RegExp must be global.');
-		
-		return rx;
-		
-	}
 	static {
-		// https://qiita.com/HMMNRST/items/4b10dfb621a469034257#-%E5%90%A6%E5%AE%9A%E5%85%88%E8%AA%AD%E3%81%BF
-		this.unit = /(?!)/g,
-		this.flags = 'g';
-	}
-	
-	constructor(unit, flags) {
 		
-		super(),
-		
-		this.setUnit(unit, flags);
+		this.str = Symbol('Pattern.str'),
+		this.escape = /[.*+?^=!:${}()|[\]\/\\]/g;
 		
 	}
 	
-	setUnit(unit, flags) {
+	constructor(str) {
 		
-		const last = this.unit;
+		this.str = str;
 		
-		unit = unit instanceof Unit ? unit.unit : Unit.createRegExpG(unit, flags);
+	}
+	
+	toString() {
 		
-		(last instanceof RegExp ? last.flags === unit.flags && last.source === unit.source : last !== unit) &&
-			this.clearCache();
+		return this.source;
 		
-		return this.unit = unit;
+	}
+	
+	set str(v) {
+		
+		// https://developer.mozilla.org/ja/docs/Web/JavaScript/Guide/Regular_Expressions#escaping
+		this[Pattern.str] = (this.source = '' + (v ?? '')).replace(Pattern.escape, '\\$&');
+		
+	}
+	get str() {
+		
+		return this[Pattern.str] ?? '';
 		
 	}
 	
 }
-export class Word {
+
+// プロパティ unit は setter, getter になっており、特定の値か、それを列挙した配列を指定すると、
+// その値を保存して、get 時に、それらを元に正規表現を即席で作成して戻り値にする。
+// unit へ指定する値は、RegExp インスタンス、Pattern インスタンスおよび文字列で、
+// RegExp の場合、そのプロパティ source の値を（一方プロパティ flags は常に無視される）、
+// Pattern の場合はプロパティ str、文字列の場合は文字列がそのまま使われ、RegExp 作成時にそれらの値を結合して一致パターンとする。
+// この内、値に Pattern を使った場合、Pattern に指定した文字列は、Pattern への指定時に、自動的に正規表現で使われるメタ文字などがエスケープされる。
+// new Unit([ /[]/, new Pattern('[]'), '[]' ])
+// 例えば上記の指定に基づいて this.unit で取得される正規表現は /[]\[\][]/g である。（フラグには常に g が追加される）
+export class Unit extends Indexer {
 	
-	static w = Symbol('Word.w');
-	
-	constuctor(str) {
+	static {
 		
-		this.w = str;
+		this.flags = Symbol('Unit.flags');
 		
 	}
 	
-	set w(str) {
+	constructor(patterns, flags) {
 		
-		// https://developer.mozilla.org/ja/docs/Web/JavaScript/Guide/Regular_Expressions#escaping
-		this[Word.w] = ('' + (str ?? '')).replace(/[.*+?^=!:${}()|[\]\/\\]/g, '\\$&');
+		super(),
+		
+		this.patterns = [],
+		
+		this.setUnit(patterns, flags);
 		
 	}
-	get w() {
+	
+	toString() {
 		
-		return this[Word.w] ?? '';
+		const u = this.unit;
+		
+		return `/${u.source}/${u.flags}`;
+	}
+	
+	// 互換用、不用になれば削除可
+	setUnit(patterns, flags) {
+		
+		this.unit = !Array.isArray(patterns) && patterns && typeof patterns === 'object' ?
+			(flags ||= patterns.flags, patterns instanceof RegExp ? patterns.source : patterns) : patterns,
+		
+		this.flags = flags;
+		
+	}
+	
+	set unit(values) {
+		
+		const l = (values = (Array.isArray(values) ? values : (values = values instanceof Chr ? values.patterns : [ values ])).flat()).length,
+				patterns = this.patterns,
+				pl = patterns.length;
+		let i, v, updated;
+		
+		i = -1;
+		while (++i < l) patterns[i] === (patterns[i] = values[i]) || (updated ||= true);
+		
+		l < pl && (patterns.length = l), (updated || l !== pl) && this.clearCache();
+		
+	}
+	get unit() {
+		
+		const { flags, patterns } = this, l = patterns.length, s = Pattern.str;
+		let i, unit, p;
+		
+		i = -1, unit = '';
+		while (++i < l) unit += (p = patterns[i])?.[s] ?? (p instanceof RegExp ? p.source : ''+p);
+		// 上記の Pattern のインスタンスからシンボル str を名前にするプロパティの値を取得しているのは最適化を意図しており、
+		// 通常は同インスタンスのプロパティ str から起動される getter 関数を通じて同じ値を同じように取得できる。
+		// この getter 関数は頻繁に呼び出される可能性が強いため、最適化の恩恵を存分に享受できる。
+		
+		return (this.last === unit && this.lastFlags === flags && this.lastRx instanceof RegExp && this.lastRx) ||
+			(this.lastRx = new RegExp(this.last = unit, this.lastFlags = flags));
+		
+	}
+	set flags(flags = 'g') {
+		
+		const lastFlags = this[Unit.flags];
+		let f;
+		
+		typeof flags === 'string' && (this[Unit.flags] = f = flags.indexOf('g') === -1 ? (flags += 'g') : flags),
+		lastFlags === f || this.clearCache();
+		
+	}
+	get flags() {
+		
+		return this[Unit.flags] ||= 'g';
 		
 	}
 	
@@ -260,11 +359,11 @@ export class Chr extends Unit {
 		
 	}
 	
-	init(unit = this.unit || Chr.unit, seq = this.seq, matchesEmpty) {
+	init(patterns = this.patterns || Chr.unit, seq = this.seq, matchesEmpty) {
 		
 		this.matchesEmpty = matchesEmpty,
-		unit === this.unit || (unit = this.setUnit(unit)),
-		seq === this.seq || (seq = this.setSeq(seq));
+		patterns === this.patterns || this.setUnit(patterns),
+		this.setSeq(seq);
 		
 		if (this.unit.source === this.seq?.source) throw new Error('The srouce of "unit" and "seq" must be different.');
 		
@@ -291,7 +390,7 @@ export class Chr extends Unit {
 		
 		i = i0 = -1;
 		while (++i < l) lastIndex in (seq = seqs[i]) && (seqLastIndices[++i0] = seq[lastIndex]);
-		//hi(str,this.unit.source,this,matched,seqLastIndices);
+		
 		return this.setCache(matched, m => seqLastIndices.indexOf(m.index) === -1);
 		
 	}
@@ -391,18 +490,18 @@ export class Chr extends Unit {
 		
 	}
 	
-	clone(seq) {
-		
-		const { unit, matchesEmpty } = this;
-		
-		return new Chr(
-				{ pattern: unit.source, flags: unit.flags, unescapes: true },
-				(seq = arguments.length ? seq : this.seq) instanceof Sequence ?
-					{ pattern: seq.unit.source, flags: seq.unit.flags, repetition: seq.repetition, unescapes: true } : null,
-				matchesEmpty
-			);
-		
-	}
+	//clone(seq) {
+	//	
+	//	const { unit, matchesEmpty } = this;
+	//	
+	//	return new Chr(
+	//			{ pattern: unit.source, flags: unit.flags, unescapes: true },
+	//			(seq = arguments.length ? seq : this.seq) instanceof Sequence ?
+	//				{ pattern: seq.unit.source, flags: seq.unit.flags, repetition: seq.repetition, unescapes: true } : null,
+	//			matchesEmpty
+	//		);
+	//	
+	//}
 	equals(chr) {
 		
 		if (!(chr instanceof Chr)) return false;
@@ -446,7 +545,7 @@ export class Term extends Array {
 		this.splices = Symbol('Term.splices'),
 		this.clones = Symbol('Term.clones'),
 		
-		this.escSeq = '\\';
+		this.escSeq = new Pattern('\\');
 		
 	}
 	static sortLocs(a, b) {
@@ -619,7 +718,7 @@ export class Term extends Array {
 	// このメソッドを事前に使えば重複する処理を回避できるかもしれないが、Term.get の汎用性が失われる恐れがある。
 	mask(str, ...masks) {
 		
-		const	l = this.length, data = [];
+		const l = this.length, data = [];
 		let i,di, chr;
 		
 		i = di = -1;
@@ -772,13 +871,25 @@ export class Term extends Array {
 		return escs;
 		
 	}
+	//clone(escSeq = this.escSeq, callback, thisArg) {
+	//	
+	//	const l = this.length, clone = new Term(), hasCallback = typeof callback === 'function', cb = Term.callback;
+	//	let i, source, chr;
+	//	
+	//	i = -1, clone.setDefaultEscSeq(escSeq);
+	//	while (++i < l)	chr = clone.chr(i, (source = this.chr(i)).clone(null)),
+	//							callback === undefined || chr.setCallback(hasCallback ? callback : source[cb], thisArg);
+	//	
+	//	return clone;
+	//	
+	//}
 	clone(escSeq = this.escSeq, callback, thisArg) {
 		
 		const l = this.length, clone = new Term(), hasCallback = typeof callback === 'function', cb = Term.callback;
 		let i, source, chr;
 		
 		i = -1, clone.setDefaultEscSeq(escSeq);
-		while (++i < l)	chr = clone.chr(i, (source = this.chr(i)).clone(null)),
+		while (++i < l)	chr = clone.chr(i, new Chr(source = this.chr(i), null)),
 								callback === undefined || chr.setCallback(hasCallback ? callback : source[cb], thisArg);
 		
 		return clone;
@@ -815,9 +926,31 @@ export class Terms extends Array {
 		return v0 && v0;
 		
 	}
+	static createTermValue(term, dict) {
+		
+		const { isArray } = Array, v = [], v0 = [], l = (isArray(term) ? term : (term = [ term ])).length;
+		let i,i0,l0,k, ti,vi, t,v1, asArray;
+		
+		i = vi = -1, (!dict || typeof dict !== 'object') && (dict = undefined);
+		while (++i < l) {
+			
+			// 冗長だが、処理の共通化のために非配列値をいったん配列に入れている。
+			i0 = ti = -1, l0 = (t = (asArray = isArray(t = term[i])) ? [ ...t ] : (v0[0] = t, v0)).length;
+			while (++i0 < l0) typeof (k = t[i0]) === 'symbol' ?
+				((v1 = dict?.[k]) == null || (t[++ti] = isArray(v1) ? Terms.createTermValue(v1, dict) : v1)) :
+				(t[++ti] = k);
+			
+			ti === -1 || (v[++vi] = asArray ? t : t[0]);
+			
+		}
+		
+		return v;
+		
+	}
 	
 	static {
 		
+		this.dict = Symbol('Terms.dict'),
 		this.termIndex = Symbol('Terms.termIndex'),
 		this.unmasks = Symbol('Terms.unmasks'),
 		this.callback = Symbol('Terms.callback'),
@@ -832,8 +965,13 @@ export class Terms extends Array {
 		//this.callback = new Map(),
 		configuration?.constructor === Object ? (
 				configuration?.terms?.constructor === Array ? super(...configuration.terms) : super(),
-				configuration.precedence &&
-					this.setByPrecedence(configuration.precedence, configuration.esc, configuration.defaultThis, configuration.replacer),
+				configuration.precedence &&	this.setByPrecedence(
+															configuration.precedence,
+															configuration.esc,
+															configuration.defaultThis,
+															configuration.replacer,
+															this[Terms.dict] = configuration?.dict ?? {}
+														),
 				this.replaceAll(configuration)
 			) :
 			super(...arguments);
@@ -860,15 +998,15 @@ export class Terms extends Array {
 	// 		このメソッドの第二引数と同じく、null を指定すると、エスケープできない Term を作成する。
 	//
 	// このメソッドは任意に設定する際の煩わしさを軽減するのが目的で、このメソッドを使わなくても同じ設定をすることは可能。
-	setByPrecedence(precedenceDescriptors, esc, defaultThis = this, replacer, terms = this) {
+	setByPrecedence(precedenceDescriptors, esc, defaultThis = this, replacer, dict, terms = this) {
 		
 		Array.isArray(precedenceDescriptors) || (precedenceDescriptors = [ precedenceDescriptors ]);
 		
 		const l = precedenceDescriptors.length, clones = replacer?.[Term.clones];
-		let i,ti, pd, term,replaces, callback, sym;
+		let i,ti, pd, term,replaces, callback;
 		
-		i = -1, ti = this.length - 1,
-		esc = esc instanceof Sequence ? esc : typeof esc === 'string' ? new Sequence(esc) : null,
+		i = -1, ti = this.length - 1,hi(esc);
+		esc = esc instanceof Sequence ? esc : typeof esc === 'string' ? new Sequence(esc) : undefined,
 		replacer || typeof replacer === 'object' || (replacer = undefined);
 		while (++i < l) {
 			
@@ -876,13 +1014,14 @@ export class Terms extends Array {
 			
 			if (Array.isArray(pd)) {
 				
-				this[++ti] = this.setByPrecedence(pd, esc, defaultThis, replacer, []);
+				this[++ti] = this.setByPrecedence(pd, esc, defaultThis, replacer, dict, []);
 				
 			} else if (pd && typeof pd === 'object') {
 				
 				term = this[++ti] = this[typeof pd.name === 'symbol' ? pd.name : Symbol(pd.name)] =
 					(term = replacer && (replaces = pd.name in replacer) ? replacer[pd.name] : pd.term) instanceof Term ?
-						replaces && clones ? term.clone('esc' in pd ? pd.esc : esc) : term : new Term(term, 'esc' in pd ? pd.esc : esc),
+						replaces && clones ? term.clone('esc' in pd ? pd.esc : esc) : term :
+							new Term(Terms.createTermValue(term, dict), 'esc' in pd ? pd.esc : esc),
 				
 				'callback' in pd && term.setCallback(pd.callback, this),
 				
@@ -1208,13 +1347,14 @@ export class ParseHelper extends Terms {
 	};
 	
 	//constructor(precedenceRemapper, esc = this.constructor.esc) {
-	constructor(configuration, constructor = ParseHelper) {
+	constructor(configuration, constructor = ParseHelper, dict) {
 		
 		Array.isArray(configuration) && (configuration = { precedence: configuration }),
 		(!configuration || configuration.constructor !== Object) && (configuration = {}),
 		
 		configuration.precedence ||= constructor[ParseHelper.precedenceDescriptors],
 		'esc' in configuration || (configuration.esc = constructor[ParseHelper.esc]),
+		configuration.dict = { ...(dict ||= {}), ...(configuration?.dict ?? {}) },
 		
 		super(configuration);
 		
@@ -1319,6 +1459,31 @@ export class ParseHelper extends Terms {
 
 export class Strings {
 	
+	// このオブジェクトの静的プロパティ escaped を所定の値に変換するためだけのメソッド。再帰を使うために作成。
+	static escape(source) {
+		
+		const { escape } = Strings;
+		
+		if (source.constructor === Object) {
+			
+			let k;
+			
+			for (k in source) source[k] = escape(source[k]);
+			
+		} else if (Array.isArray(source)) {
+			
+			const l = source.length;
+			let i;
+			
+			i = -1;
+			while (++i < l) source[i] = escape(source[i]);
+			
+		} else {return source instanceof RegExp ? source.source : new Pattern(source);}
+		
+		return source;
+		
+	}
+	
 	static {
 		
 		this.options = {
@@ -1330,27 +1495,119 @@ export class Strings {
 				
 			}
 			
-		}
+		};
 		
+		const escaped = this.escaped = {
+			
+			squareBracketLeft: '[',
+			squareBracketRight: ']',
+			parenthesisLeft: '(',
+			parenthesisRight: ')',
+			lessThanSign: '<',
+			greaterThanSign: '>',
+			singleQuotationMark: "'",
+			graveAccent: '`',
+			dollarSign: '$',
+			equalsSign: '=',
+			colon: ':',
+			semicolon: ';',
+			exclamationMark: '!',
+			comma: ',',
+			
+			division: '/',
+			multiplication: '*',
+			subtraction: '-',
+			addition: '+',
+			
+			nai: [ 'nai', 'null' ],
+			hu: [ 'hu', 'undefined' ],
+			shin: [ 'shin', 'true' ],
+			gi: [ 'gi', 'false' ],
+			
+		};
+		
+		this.escape(escaped);
+		
+		const	dict = this.dict = {
+					
+					bracketLeft: escaped.squareBracketLeft,
+					bracketRight: escaped.squareBracketRight,
+					stringLeft: escaped.singleQuotationMark,
+					stringRight: escaped.singleQuotationMark,
+					groupLeft: escaped.parenthesisLeft,
+					groupRight: escaped.parenthesisRight,
+					evalLeft: escaped.graveAccent,
+					evalRight: escaped.graveAccent,
+					referenceSign: escaped.dollarSign,
+					referenceRight: escaped.squareBracketRight,
+					nestLeft: escaped.lessThanSign,
+					nestRight: escaped.greaterThanSign,
+					
+					assign: escaped.equalsSign,
+					mute: escaped.semicolon,
+					separator: escaped.colon,
+					disable: escaped.exclamationMark,
+					comma: escaped.comma,
+					
+					division: escaped.division,
+					multiplication: escaped.multiplication,
+					subtraction: escaped.subtraction,
+					addition: escaped.addition,
+					
+					number: /(-?(\d+(?:\.\d+)?|Infinity)|NaN)/g,
+					identifier: /[$A-Za-z_\u0080-\uFFFF][$\w\u0080-\uFFFF]*/g,
+					space: /[\n\s\t]+/g,
+					
+					nai: new RegExp(`(?:${escaped.nai.join('|')})`, 'g'),
+					hu: new RegExp(`(?:${escaped.hu.join('|')})`, 'g'),
+					shin: new RegExp(`(?:${escaped.shin.join('|')})`, 'g'),
+					gi: new RegExp(`(?:${escaped.gi.join('|')})`, 'g')
+					
+				};
+		
+		dict.referenceLeft = [ dict.referenceSign, dict.bracketLeft ],
+		dict.referenceRight = dict.bracketRight;
 		
 	}
 	
-	constructor(param, sp, exp, desc) {
+	constructor(sp, exp, desc) {
 		
-		sp = this.sp = sp instanceof StringsParser ? sp : new StringsParser(sp);
+		const { symbol } = ParseHelper, { dict } = Strings;
+		let k;
 		
-		const	sps = StringsParser[ParseHelper.symbol], es = StringsExpression[ParseHelper.symbol];
+		if (!(sp instanceof StringsParser)) {
+			
+			const sps = StringsParser[symbol], d = {};
+			
+			for (k in dict) d[sps[k]] = dict[k];
+			sp = new StringsParser(sp, d);
+			
+		}
 		
-		this.exp = exp instanceof StringsExpression ?	exp :
-																		new StringsExpression({
-																			replacer: {
-																				[Term.clones]: true,
-																				[es.str]: this.sp[sps.str],
-																				[es.ref]: this.sp[sps.ref],
-																				[es.nst]: this.sp[sps.nst],
-																				[es.evl]: this.sp[sps.evl]
-																			}
-																		}),
+		this.sp = sp;
+		
+		const sps = StringsParser[ParseHelper.symbol], es = StringsExpression[ParseHelper.symbol];
+		
+		if (!(exp instanceof StringsExpression)) {
+			
+			const exps = StringsExpression[symbol], d = {};
+			
+			for (k in dict) d[exps[k]] = dict[k];
+			exp = new StringsExpression(exp, d);
+			
+		}
+		
+		this.exp = exp;
+		
+		//hi(sp);
+		//hi(sp[1][0].unit,sp[0][0].patterns[0]);
+		////hi(sp);
+		//Strings.escaped.singleQuotationMark.str = '@';
+		//hi(sp[0][0].patterns[0],Strings.escaped.singleQuotationMark === dict.stringLeft);
+		//hi(sp.get('[a=b:c:d]'), sp.get('[a:d]'));
+		
+		//hi(exp[0][0].patterns[0],Strings.escaped.singleQuotationMark === dict.stringLeft);
+		//hi(sp.get('[a=b:c:d]'), sp.get('[a:d]'));
 		
 		this.optionsSeparator = new Chr(/[\s\t]+/g),
 		this.optionsMasks = this.exp[es.grp],
@@ -1468,67 +1725,6 @@ export class Strings {
 
 export class StringsParser extends ParseHelper {
 	
-	static {
-		
-		this.assignedIndex = Symbol('StringsParser.assignedIndex'),
-		//this.optionName = Symbol('StringsParser.optionName'),
-		this.nests = Symbol('StringsParser.nests'),
-		this.evaluates = Symbol('StringsParser.evaluates'),
-		this.refers = Symbol('StringsParser.refers'),
-		
-		// esc = escape
-		this[ParseHelper.esc] = '\\',
-		
-		// str = string, nst = nest, ref = reference, blk = block
-		this[ParseHelper.symbolNames] = [
-			'str', 'nst',
-			'ref', 'syx', 'sys', 'syl',
-			're', 'evl', 'fnc', 'dom', 'amp', 'frk', 'ech', 'clc',
-			'backwards', 'every'
-		],
-		
-		(this.syx = {
-			str: [ "'", "'" ],
-			nest: [ '<', '>' ],
-			evl: [ '`', '`' ],
-			ref: [ '$[', ']' ],
-			l: '[',
-			r: ']',
-			assign: '=',
-			mute: ';',
-			separator: ':',
-			disable: '!',
-			comma: new Chr(/[\n\s\t]*,[\n\s\t]*/g),
-			//space: new Chr(/[\n\s\t]+/g)
-		}).assignment =
-			new Chr(new RegExp(`[${Unit.escapeRegExpPattern(this.syx.mute + this.syx.separator + this.syx.disable)}]`, 'g'));
-		
-		const	s = ParseHelper.setSymbols(this),
-				{ str,nest,evl,ref,arg, l, r, assign, mute, separator, disable } = this.syx,
-				assignment = this.syx.assignment;
-		
-		this[ParseHelper.precedenceDescriptors] = [
-			{ name: s.str, term: str, unmasks: true },
-			//{ name: s.arg, term: arg, unmasks: true },
-			{ name: s.ref, term: ref, callback: StringsParser.reference },
-			{ name: s.syx, term: [ l, r ], callback: StringsParser.parse },
-			{ name: s.nst, term: nest, callback: StringsParser.nest },
-			{ name: s.evl, term: evl, callback: StringsParser.evl },
-		],
-		
-		this.parameterPrecedence = [
-			{ name: s.str, term: str, esc: null, unmasks: true },
-			{ name: s.ref, term: ref, esc: null, unmasks: true },
-			{ name: s.nst, term: nest, esc: null, unmasks: true },
-			{ name: s.evl, term: evl, esc: null, unmasks: true },
-			//{ name: s.arg, term: arg, esc: null, unmasks: true },
-			{ name: s.syx, term: [ l, r ], esc: null, unmasks: true },
-			// sys = syntax short, syl = syntax long
-			{ name: s.sys, term: [ /^/g, assignment, /$/g ], esc: null },
-			{ name: s.syl, term: [ /^/g, assignment, separator, /$/g ], esc: null },
-		];
-		
-	}
 	static nest(mask, masks, input, detail, self) {
 		
 		const v = new String(mask.inners[0]);
@@ -1558,19 +1754,27 @@ export class StringsParser extends ParseHelper {
 	}
 	static parse(mask, masks, input, detail, self) {
 		
+		if (!mask.inners[0]) return mask.$;
+		
 		const pm = this.paramMask.getMasks(mask.inners[0]).masks;
 		
-		const { captor, splitted } = pm[0][0], { symbol, syx } = StringsParser, disable = syx.disable;
+		if (!pm.length) return mask.$;
 		
-		if (disable instanceof RegExp ? disable.test(splitted[2][0]) : splitted[2][0] === disable) return '';
+		const	{ captor, splitted } = pm[0][0],
+				{ symbol } = StringsParser,
+				s = StringsParser[symbol],
+				dict = this[Terms.dict],
+				disable = dict[s.disable];
 		
-		const	s = StringsParser[symbol],
-				{ optionName, syntaxError } = StringsParser,
-				{ assign, comma, mute, space } = syx,
+		if (disable instanceof RegExp ? disable.test(splitted[2][0]) : splitted[2][0] === ''+disable) return '';
+		
+		const	{ optionName, syntaxError } = StringsParser,
+				assign = dict[s.assign],
+				mute = dict[s.mute],
 				header = splitted[1].split(assign),
 				descriptor = header[0]?.trim?.(),
 				label = header.length > 1 ? header?.[1]?.trim?.() : null,
-				mutes = mute instanceof RegExp ? mute.test(splitted[2][0]) : splitted[2][0] === mute;
+				mutes = mute instanceof RegExp ? mute.test(splitted[2][0]) : splitted[2][0] === ''+mute;
 		let i,l, options,opt, args, v;
 		
 		switch (captor) {
@@ -1590,12 +1794,111 @@ export class StringsParser extends ParseHelper {
 		return mutes ? { muted: v } : v;
 		
 	}
-	
-	constructor(configuration) {
+	static {
 		
-		super(configuration, StringsParser);
+		this.assignedIndex = Symbol('StringsParser.assignedIndex'),
+		//this.optionName = Symbol('StringsParser.optionName'),
+		this.nests = Symbol('StringsParser.nests'),
+		this.evaluates = Symbol('StringsParser.evaluates'),
+		this.refers = Symbol('StringsParser.refers'),
+		
+		// esc = escape
+		this[ParseHelper.esc] = new Pattern('\\'),
+		
+		// str = string, nst = nest, ref = reference, blk = block
+		this[ParseHelper.symbolNames] = [
+			
+			'str', 'nst',
+			'ref', 'syx', 'sys', 'syl',
+			're', 'evl', 'fnc', 'dom', 'amp', 'frk', 'ech', 'clc',
+			'backwards', 'every',
+			
+			'bracketLeft',
+			'bracketRight',
+			'stringLeft',
+			'stringRight',
+			'nestLeft',
+			'nestRight',
+			'evalLeft',
+			'evalRight',
+			'referenceLeft',
+			'referenceRight',
+			'assign',
+			'mute',
+			'separator',
+			'disable',
+			'assignment',
+			
+		];
+		
+		const	s = ParseHelper.setSymbols(this),
+				dict = this.dict =	{
+												[s.bracketLeft]: new Pattern('['),
+												[s.bracketRight]: new Pattern(']'),
+												[s.stringLeft]: new Pattern("'"),
+												[s.stringRight]: new Pattern("'"),
+												[s.nestLeft]: new Pattern('<'),
+												[s.nestRight]: new Pattern('>'),
+												[s.evalLeft]: new Pattern('`'),
+												[s.evalRight]: new Pattern('`'),
+												[s.assign]: new Pattern('='),
+												[s.mute]: new Pattern(';'),
+												[s.separator]: new Pattern(':'),
+												[s.disable]: new Pattern('!'),
+												[s.referenceSign]: new Pattern('$'),
+											};
+		
+		dict[s.referenceLeft] = [ dict[s.referenceSign], dict[s.bracketLeft] ],
+		dict[s.referenceRight] = dict[s.bracketRight],
+		dict[s.assignment] = [ '(?:', dict[s.mute], '|', dict[s.separator], '|', dict[s.disable], ')' ],
+		
+		//	new Chr(new RegExp(`[${Unit.escapeRegExpPattern(this.syx.mute + this.syx.separator + this.syx.disable)}]`, 'g'));
+		//(this.syx = {
+		//	str: [ Strings.str[0], Strings.str[1] ],
+		//	nest: [ '<', '>' ],
+		//	evl: [ '`', '`' ],
+		//	ref: [ '$[', ']' ],
+		//	l: '[',
+		//	r: ']',
+		//	assign: '=',
+		//	mute: ';',
+		//	separator: ':',
+		//	disable: '!',
+		//	comma: new Chr(/[\n\s\t]*,[\n\s\t]*/g),
+		//	//space: new Chr(/[\n\s\t]+/g)
+		//}).assignment =
+		//	new Chr([ '(?:', new Pattern(this.syx.mute), '|', new Pattern(this.syx.separator), '|', new Pattern(this.syx.disable), ')' ]);
+		//	//new Chr(new RegExp(`[${Unit.escapeRegExpPattern(this.syx.mute + this.syx.separator + this.syx.disable)}]`, 'g'));
+		
+		this[ParseHelper.precedenceDescriptors] = [
+			{ name: s.str, term: [ s.stringLeft, s.stringRight ], unmasks: true },
+			{ name: s.ref, term: [ s.referenceLeft, s.referenceRight ], callback: StringsParser.reference },
+			{ name: s.syx, term: [ s.bracketLeft, s.bracketRight ], callback: StringsParser.parse },
+			{ name: s.nst, term: [ s.nestLeft, s.nestRight ], callback: StringsParser.nest },
+			{ name: s.evl, term: [ s.evalLeft, s.evalRight ], callback: StringsParser.evl },
+		],
+		
+		this.parameterPrecedence = [
+			{ name: s.str, term: [ s.stringLeft, s.stringRight ], esc: null, unmasks: true },
+			{ name: s.ref, term: [ s.referenceLeft, s.referenceRight ], esc: null, unmasks: true },
+			{ name: s.nst, term: [ s.nestLeft, s.nestRight ], esc: null, unmasks: true },
+			{ name: s.evl, term: [ s.evalLeft, s.evalRight ], esc: null, unmasks: true },
+			{ name: s.syx, term: [ s.bracketLeft, s.bracketRight ], esc: null, unmasks: true },
+			{ name: s.sys, term: [ /^/g, s.assignment, /$/g ], esc: null },
+			{ name: s.syl, term: [ /^/g, s.assignment, s.separator, /$/g ], esc: null },
+		];
+		
+	}
+	
+	constructor(configuration, dict) {
 		
 		const s = StringsParser[ParseHelper.symbol];
+		
+		super(
+			configuration,
+			StringsParser,
+			{ ...StringsParser.dict, ...(dict && typeof dict === 'object' ? dict : {}) }
+		),
 		
 		this.paramMask =	new Terms({
 									precedence: StringsParser.parameterPrecedence,
@@ -1607,10 +1910,11 @@ export class StringsParser extends ParseHelper {
 										[s.nst]: this[s.nst],
 										[s.evl]: this[s.evl],
 										[s.syx]: this[s.syx]
-									}
+									},
+									dict: this[Terms.dict]
 								}),
 		
-		this[ParseHelper.escOwners] = [ this.paramMask, StringsParser.syx.comma ];
+		this[ParseHelper.escOwners] = [ this.paramMask ];
 		
 	}
 	
@@ -1665,7 +1969,9 @@ export class StringsExpression extends ParseHelper {
 	}
 	static number(mask, masks, input, detail, self) {
 		
-		return +mask.$;
+		let v = +mask.$;
+		
+		return v < 0 && ((v = [ StringsExpression[ParseHelper.symbol].minus, v ])[Term.splices] = true), v;
 		
 	}
 	static string(mask, masks, input, detail, self) {
@@ -1683,6 +1989,18 @@ export class StringsExpression extends ParseHelper {
 		
 	}
 	
+	static minus(v, left, right, idx, ldx, rdx, exp, parsed, parsedLength, plot, plotLength, input, detail, self) {
+		
+		(
+			v = [ idx, 2 ],
+			typeof left === 'symbol' ? (v[2] = right) :
+												(v[2] = StringsExpression[ParseHelper.symbol].sub, v[3] = right * -1),
+			v
+		)[StringsExpression.splices] = true;
+		
+		return v;
+		
+	}
 	static add(v, left, right, idx, ldx, rdx, exp, parsed, parsedLength, plot, plotLength, input, detail, self) {
 		
 		const { bound, splices } = StringsExpression;
@@ -1746,6 +2064,7 @@ export class StringsExpression extends ParseHelper {
 		this.splices = Symbol('StringsExpression.splices'),
 		
 		this[ParseHelper.symbolNames] = [
+			
 			'add',
 			'cmm',
 			'div',
@@ -1763,62 +2082,106 @@ export class StringsExpression extends ParseHelper {
 			'spc',
 			'str',
 			'sub',
+			
+			'minus',
+			
+			'bracketLeft',
+			'bracketRight',
+			'stringLeft',
+			'stringRight',
+			'evalLeft',
+			'evalRight',
+			'nestLeft',
+			'nestRight',
+			'groupLeft',
+			'groupRight',
+			'referenceSign',
+			'number',
+			'nai',
+			'hu',
+			'shin',
+			'gi',
+			'identifier',
+			'comma',
+			'division',
+			'multiplication',
+			'subtraction',
+			'addition',
+			'space',
+			'referenceLeft',
+			'referenceRight',
+			
 		];
 		
-		const	{
-					add,
-					cmm,
-					div,
-					evl,
-					gi,
-					grp,
-					hu,
-					idt,
-					mul,
-					nai,
-					nst,
-					num,
-					ref,
-					shin,
-					spc,
-					str,
-					sub
-				} = ParseHelper.setSymbols(this);
+		const	s = ParseHelper.setSymbols(this),
+				dict = this.dict =	{
+												[s.bracketLeft]: new Pattern('['),
+												[s.bracketRight]: new Pattern(']'),
+												[s.stringLeft]: new Pattern("'"),
+												[s.stringRight]: new Pattern("'"),
+												[s.evalLeft]: new Pattern('`'),
+												[s.evalRight]: new Pattern('`'),
+												[s.nestLeft]: new Pattern('<'),
+												[s.nestRight]: new Pattern('>'),
+												[s.groupLeft]: new Pattern('('),
+												[s.groupRight]: new Pattern(')'),
+												[s.referenceSign]: new Pattern('$'),
+												[s.number]: /(-?(\d+(?:\.\d+)?|Infinity)|NaN)/g,
+												[s.nai]: /(?:nai|null)/g,
+												[s.hu]: /(?:hu|undefined)/g,
+												[s.shin]: /(?:shin|true)/g,
+												[s.gi]: /(?:gi|false)/g,
+												[s.identifier]: /[$A-Za-z_\u0080-\uFFFF][$\w\u0080-\uFFFF]*/g,
+												[s.comma]: new Pattern(','),
+												[s.division]: new Pattern('/'),
+												[s.multiplication]: new Pattern('*'),
+												[s.subtraction]: new Pattern('-'),
+												[s.addition]: new Pattern('+'),
+												[s.space]: /[\n\s\t]+/g
+											};
+		
+		dict[s.referenceLeft] = [ dict[s.referenceSign], dict[s.bracketLeft] ],
+		dict[s.referenceRight] = dict[s.bracketRight],
 		
 		this.opsPrecedence = [
-			{ sym: div, callback: StringsExpression.div },
-			{ sym: mul, callback: StringsExpression.mul },
-			{ sym: sub, callback: StringsExpression.sub },
-			{ sym: add, callback: StringsExpression.add }
+			{ sym: s.minus, callback: StringsExpression.minus },
+			{ sym: s.div, callback: StringsExpression.div },
+			{ sym: s.mul, callback: StringsExpression.mul },
+			{ sym: s.sub, callback: StringsExpression.sub },
+			{ sym: s.add, callback: StringsExpression.add }
 		],
 		
 		this[ParseHelper.precedenceDescriptors] = [
 			
-			{ name: str, term: [ "'", "'" ], callback: StringsExpression.string },
-			{ name: evl, term: [ '`', '`' ], callback: StringsExpression.eval },
-			{ name: nst, term: [ '<', '>' ], callback: StringsExpression.nest },
-			{ name: grp, term: [ '(', ')' ], callback: StringsExpression.group },
-			{ name: ref, term: [ '$[', ']' ], callback: StringsExpression.identify },
-			{ name: num, term: [ /(-?(\d+(?:\.\d+)?|Infinity)|NaN)/g ], callback: StringsExpression.number },
-			{ name: nai, term: [ /(?:nai|null)/g ], callback: null },
-			{ name: hu, term: [ /(hu|undefined)/g ], callback: undefined },
-			{ name: shin, term: [ /(shin|true)/g ], callback: true },
-			{ name: gi, term: [ /(gi|false)/g ], callback: false },
-			{ name: idt, term: [ /[$A-Za-z_\u0080-\uFFFF][$\w\u0080-\uFFFF]*/g ], callback: StringsExpression.identify },
-			{ name: cmm, term: [ ',' ], callback: cmm },
-			{ name: div, term: [ '/' ], callback: div },
-			{ name: mul, term: [ '*' ], callback: mul },
-			{ name: sub, term: [ '-' ], callback: sub },
-			{ name: add, term: [ '+' ], callback: add },
-			{ name: spc, term: [ /[\n\s\t]+/g ], callback: Term.deletes }
+			{ name: s.str, term: [ s.stringLeft, s.stringRight ], callback: StringsExpression.string },
+			{ name: s.evl, term: [ s.evalLeft, s.evalRight ], callback: StringsExpression.eval },
+			{ name: s.nst, term: [ s.nestLeft, s.nestRight ], callback: StringsExpression.nest },
+			{ name: s.grp, term: [ s.groupLeft, s.groupRight ], callback: StringsExpression.group },
+			{ name: s.ref, term: [ s.referenceLeft, s.referenceRight ], callback: StringsExpression.identify },
+			{ name: s.num, term: [ s.number ], callback: StringsExpression.number },
+			{ name: s.nai, term: [ s.nai ], callback: null },
+			{ name: s.hu, term: [ s.hu ], callback: undefined },
+			{ name: s.shin, term: [ s.shin ], callback: true },
+			{ name: s.gi, term: [ s.gi ], callback: false },
+			{ name: s.idt, term: [ s.identifier ], callback: StringsExpression.identify },
+			{ name: s.cmm, term: [ s.comma ], callback: s.cmm },
+			{ name: s.div, term: [ s.division ], callback: s.div },
+			{ name: s.mul, term: [ s.multiplication ], callback: s.mul },
+			{ name: s.sub, term: [ s.subtraction ], callback: s.sub },
+			{ name: s.add, term: [ s.addition ], callback: s.add },
+			{ name: s.spc, term: [ s.space ], callback: Term.deletes }
 			
 		];
 		
 	}
 	
-	constructor(configuration) {
+	constructor(configuration, dict) {
 		
-		super(configuration, StringsExpression);
+		super(
+			configuration,
+			StringsExpression,
+			{ ...StringsExpression.dict, ...(dict && typeof dict === 'object' ? dict : {}) }
+		),
 		
 		this[ParseHelper.escOwners] = []
 		
