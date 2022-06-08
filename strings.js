@@ -366,24 +366,26 @@ export class Chr extends Unit {
 		
 		const	matched = [ ...str.matchAll(this.matchesEmpty ? this.unit : this) ],
 				l = matched.length,
-				seqs = this.seq?.index?.(str, true)?.[Indexer.indexed]?.get?.(Sequence.cacheHandler),
-				unescaped = [];
+				seqs = l && this.seq?.index?.(str, true)?.[Indexer.indexed]?.get?.(Sequence.cacheHandler);
 		
-		if (seqs) {
-			
-			const l0 = seqs.length;
-			let i,i0,i1, m,mi;
-			
-			i = i1 = -1;
-			while (++i < l) {
-				i0 = -1, mi = (m = matched[i]).index;
-				while (++i0 < l0 && seqs[i0].lastIndex !== mi);
-				i0 === l0 && (unescaped[++i1] = m);
-			}
-			
+		if (!seqs) return this.setCache(matched);
+		
+		const l0 = seqs.length, unescaped = [];
+		let i,i0,i1, m,mi;
+		
+		i = i1 = -1;
+		while (++i < l) {
+			i0 = -1, mi = (m = matched[i]).index;
+			while (++i0 < l0 && seqs[i0].lastIndex !== mi);
+			i0 === l0 && (unescaped[++i1] = m);
 		}
 		
-		return this.setCache(seqs ? unescaped : matched);
+		// 本来は setCache には String.prototype.matchAll の戻り値を任意の関数を伴ってそのまま指定すべきだが、
+		// ここでは最適化を企図して、あらかじめ戻り値から必要な要素だけをフィルタリングした上で指定している。
+		// これによりキャッシュのプロパティ Indexer.indexed の Map を経ずにキャッシュを取得をすることができるようになるが、一方で
+		// 仮に matchAll の戻り値を別に、そのままの形でキャッシュしたい時に不整合を引き起こす可能性が生じる。
+		
+		return this.setCache(unescaped);
 		
 	}
 	
