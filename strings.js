@@ -3,7 +3,6 @@ export class Indexer {
 	static {
 		
 		this.indexed = Symbol('Indexer.indexed'),
-		this.lastIndex = Symbol('Indexer.lastIndex'),
 		this.anon = Symbol('Indexer.anon');
 		
 	}
@@ -13,38 +12,63 @@ export class Indexer {
 		this.cache = {};
 		
 	}
-	// キャッシュされる値は matchAll の戻り値である配列内の要素をそのまま使う。
-	// すべての要素にはプロパティ input があり、これは一致検索の文字列全体を示す。
-	// つまり各要素の input は重複しており、仮にその文字列が非常に巨大だった場合、リソースに負荷を与えることが予想される。
-	// このプロパティ input は、現状では（多分）使用していないため、削除するか、別に一元化してプロパティとして保存しても恐らく問題はないと思われる。
-	// ただし、単純に削除した場合、出力から入力を復元することができなくなる点に留意が必要。
+	
+	// 第一引数 matched に与えられた String.prototype.matchAll の戻り値の要素に、以下のプロパティを設定してキャッシュする。
+	// 	captor
+	// 		文字列に対して一致を示した、このオブジェクトないしこのオブジェクトの継承先を示す。
+	// 	lastIndex
+	// 		一致の終端位置を示す数値。位置は、例えば一致した文字列長が 1 で、
+	// 		matchAll の戻り値の要素が持つプロパティ index が 2 だった場合、このプロパティは 3 を示す。
+	// また後述するように、要素だけでなく matched そのものにもプロパティが設定される。
+	// キャッシュされた matched は、matchAll を使う継承先の実装に基づいて再利用される。
+	// 第二引数 handler に関数を指定すると、matched の各要素を引数にして任意に実装されたその関数を順次実行し、
+	// 関数の戻り値が真を示した要素を、matched のプロパティ Indexer.indexed に設定した Map に、
+	// handler をキーにした配列に列挙して値として保存する。
+	// これにより、特定の条件に基づいて不要な要素をフィルタリングした matched を逐次再利用できる。
+	// 
+	// handler には以下の引数が与えられる。
+	// 	m
+	// 		matched の要素。先頭から末尾に向けて順に指定される。
+	// 	i
+	// 		第一引数 m の matched 内の位置を示す数値。
+	// 	l
+	// 		matched の要素数。
+	// matched はそのままキャッシュされる上、 Indexer.indexed には、その部分的なコピーも重複して保存されるため、
+	// 状況次第でリソース上の問題を引き起こす可能性がある。
+	// リソースを考慮する場合、matched のプロパティ input を削除するか、キャッシュに紐付ける形で一元化して保存することで軽減する対策が考えられる。
 	setCache(matched, handler) {
 		
-		const cache = this.cache, input = matched[0]?.input || Indexer.anon;
+		if (!Array.isArray(matched) && !(Symbol.iterator in matched && (matched = [ ...matched ])))
+			throw new Error('Argument "matched" must be an iterable object.');
 		
-		if (!(input in cache)) {
+		const { cache } = this, input = matched[0]?.input || Indexer.anon;
+		
+		if (!(input in cache) || (handler && !cache[input]?.has?.(handler))) {
 			
-			const	{ indexed, lastIndex } = Indexer,
-					v = (cache[input] = matched)[indexed] = [], l = matched.length, handles = typeof handler === 'function';
+			const	{ indexed } = Indexer, l = matched.length, v = [], handles = typeof handler === 'function';
 			let i,i0, m;
 			
-			i = i0 = -1;
-			while (++i < l)	(m = matched[i]).captor = this,
-									(!handles || handler(m, i,l)) && ((v[++i0] = m)[lastIndex] = m.index + m[0].length);
+			i = i0 = -1, ((cache[input] ||= matched)[indexed] ||= new Map()).set(handler, v);
+			while (++i < l)	(m = matched[i]).captor ||= this,
+									m.lastIndex = m.index + m[0].length,
+									(!handles || handler(m, i,l)) && (v[++i0] = m);
 			
 		}
 		
 		return cache[input];
 		
 	}
-	getCache(str) {
+	getCache(str, handler, rx) {
 		
-		return this.cache?.[str ?? Indexer.anon];
+		const cache =	this.cache?.[(str = ''+str) || Indexer.anon] ||
+								(rx instanceof RegExp && this.setCache(str.matchAll(rx), handler));
+		
+		return cache && typeof handler === 'function' ? cache?.[indexer.indexed].get?.(handler) : cache;
 		
 	}
 	clearCache() {
 		
-		const cache = this.cache;
+		const { cache } = this;
 		let k;
 		
 		for (k in cache) delete cache[k];
@@ -52,56 +76,7 @@ export class Indexer {
 	}
 	
 }
-//export class Unit extends Indexer {
-//	
-//	static escapeRegExpPattern(pattern) {
-//		// https://developer.mozilla.org/ja/docs/Web/JavaScript/Guide/Regular_Expressions#escaping
-//		return pattern.replace(/[.*+?^=!:${}()|[\]\/\\]/g, '\\$&');
-//		
-//	}
-//	static createRegExpG(rx = Unit.unit, flags = Unit.flags) {
-//		
-//		rx instanceof RegExp || (
-//			(rx && typeof rx === 'object') ||
-//				(rx = { pattern: Unit.escapeRegExpPattern(''+(rx || '')), unescapes: true, flags }),
-//			typeof (flags = 'flags' in rx ? rx.flags : flags) === 'string' ?
-//				flags.indexOf('g') === -1 && (flags += 'g') : (flags = 'g'),
-//			rx = new RegExp((rx?.unescapes ? rx?.pattern: Unit.escapeRegExpPattern(rx.pattern)) ?? Unit.unit, flags)
-//		);
-//		
-//		if (!rx.global) throw new TypeError('RegExp must be global.');
-//		
-//		return rx;
-//		
-//	}
-//	static {
-//		// https://qiita.com/HMMNRST/items/4b10dfb621a469034257#-%E5%90%A6%E5%AE%9A%E5%85%88%E8%AA%AD%E3%81%BF
-//		this.unit = /(?!)/g,
-//		this.flags = 'g';
-//	}
-//	
-//	constructor(unit, flags) {
-//		
-//		super(),
-//		
-//		this.setUnit(unit, flags);
-//		
-//	}
-//	
-//	setUnit(unit, flags) {
-//		
-//		const last = this.unit;
-//		
-//		unit = unit instanceof Unit ? unit.unit : Unit.createRegExpG(unit, flags);
-//		
-//		(last instanceof RegExp ? last.flags === unit.flags && last.source === unit.source : last !== unit) &&
-//			this.clearCache();
-//		
-//		return this.unit = unit;
-//		
-//	}
-//	
-//}
+
 export class Pattern {
 	
 	static {
@@ -163,13 +138,6 @@ export class Unit extends Indexer {
 		
 	}
 	
-	toString() {
-		
-		const u = this.unit;
-		
-		return `/${u.source}/${u.flags}`;
-	}
-	
 	// 互換用、不用になれば削除可
 	setUnit(patterns, flags) {
 		
@@ -180,9 +148,18 @@ export class Unit extends Indexer {
 		
 	}
 	
+	toString() {
+		
+		const u = this.unit;
+		
+		return `/${u.source}/${u.flags}`;
+		
+	}
+	
 	set unit(values) {
 		
-		const l = (values = (Array.isArray(values) ? values : (values = values instanceof Chr ? values.patterns : [ values ])).flat()).length,
+		const l =	(values = (Array.isArray(values) ? values :
+							(values = values instanceof Chr ? values.patterns : [ values ])).flat()).length,
 				patterns = this.patterns,
 				pl = patterns.length;
 		let i, v, updated;
@@ -263,7 +240,7 @@ export class Sequence extends Unit {
 		
 		const matched = [ ...str.matchAll(this.unit) ], l = matched.length;
 		
-		if (!l) return this.setCache(matched);
+		if (!l) return this.setCache(matched, Sequence.cacheHandler);
 		
 		const indices = [], repetition = this.repetition;
 		let i,i0,l0,i1,l1,i2,l2, m,m0,mi, ii, times,outOfRepetition,cnt;
@@ -325,7 +302,8 @@ export class Sequence extends Unit {
 	}
 	replace(str, replacer = '') {
 		
-		const matched = this.index(str, true)[Indexer.indexed], l = matched.length, u = this.unit;
+		const	matched = this.index(str, true)[Indexer.indexed].get(Sequence.cacheHandler),
+				l = matched.length, u = this.unit;
 		let i,m,lm, replaced;
 		
 		i = -1, replaced = '';
@@ -343,7 +321,11 @@ export class Sequence extends Unit {
 // https://developer.mozilla.org/ja/docs/Web/JavaScript/Reference/Global_Objects/Symbol#static_properties
 export class Chr extends Unit {
 	
-	static unit = '#';
+	static {
+		
+		this.unit = '#';
+		
+	}
 	
 	// 既定では、このオブジェクトを通じて文字列の一致判定をした時、
 	// 指定した正規表現が空文字との一致を示しても、
@@ -378,20 +360,30 @@ export class Chr extends Unit {
 	
 	index(str) {
 		
-		if (str in this.cache) return this.cache[str];
+		const k = str || Indexer.anon;
+		
+		if (k in this.cache) return this.cache[k];
 		
 		const	matched = [ ...str.matchAll(this.matchesEmpty ? this.unit : this) ],
-				seqs = this.seq?.index?.(str, true);
+				l = matched.length,
+				seqs = this.seq?.index?.(str, true)?.[Indexer.indexed]?.get?.(Sequence.cacheHandler),
+				unescaped = [];
 		
-		if (!seqs) return this.setCache(matched);
+		if (seqs) {
+			
+			const l0 = seqs.length;
+			let i,i0,i1, m,mi;
+			
+			i = i1 = -1;
+			while (++i < l) {
+				i0 = -1, mi = (m = matched[i]).index;
+				while (++i0 < l0 && seqs[i0].lastIndex !== mi);
+				i0 === l0 && (unescaped[++i1] = m);
+			}
+			
+		}
 		
-		const seqLastIndices = [], lastIndex = Indexer.lastIndex, l = seqs.length;
-		let i,i0,seq;
-		
-		i = i0 = -1;
-		while (++i < l) lastIndex in (seq = seqs[i]) && (seqLastIndices[++i0] = seq[lastIndex]);
-		
-		return this.setCache(matched, m => seqLastIndices.indexOf(m.index) === -1);
+		return this.setCache(seqs ? unescaped : matched);
 		
 	}
 	
@@ -400,7 +392,8 @@ export class Chr extends Unit {
 	// index はこのメソッドと比べて冗長で不要な情報を多く含んだ戻り値を作成する。
 	test(str, ...masks) {
 		
-		const indexed = this.index(str)[Indexer.indexed], l = indexed?.length, l0 = masks.length;
+		const	indexed = this.index(str),
+				l = indexed?.length, l0 = masks.length;
 		
 		if (!l0) return !!l;
 		
@@ -439,7 +432,7 @@ export class Chr extends Unit {
 		
 		const	data = { matched: this.index(str), masked: [] },
 				matched = data.matched,
-				unmasked = data.unmasked = matched && [ ...matched[Indexer.indexed] ],
+				unmasked = data.unmasked = matched && [ ...matched ],
 				l = unmasked?.length,
 				l0 = masks.length;
 		
@@ -510,6 +503,7 @@ export class Chr extends Unit {
 		
 		return u.source === u0.source && u.flags === u0.flags &&
 			s?.source === s0?.source && s?.flags === s0?.flags && s?.repetition === s0?.repetition;
+		
 	}
 	
 	// このオブジェクトのインスタンを String.prototype.matchAll の第一引数に与えた時にこのメソッドが実行される。
@@ -871,18 +865,6 @@ export class Term extends Array {
 		return escs;
 		
 	}
-	//clone(escSeq = this.escSeq, callback, thisArg) {
-	//	
-	//	const l = this.length, clone = new Term(), hasCallback = typeof callback === 'function', cb = Term.callback;
-	//	let i, source, chr;
-	//	
-	//	i = -1, clone.setDefaultEscSeq(escSeq);
-	//	while (++i < l)	chr = clone.chr(i, (source = this.chr(i)).clone(null)),
-	//							callback === undefined || chr.setCallback(hasCallback ? callback : source[cb], thisArg);
-	//	
-	//	return clone;
-	//	
-	//}
 	clone(escSeq = this.escSeq, callback, thisArg) {
 		
 		const l = this.length, clone = new Term(), hasCallback = typeof callback === 'function', cb = Term.callback;
@@ -998,6 +980,11 @@ export class Terms extends Array {
 	// 		このメソッドの第二引数と同じく、null を指定すると、エスケープできない Term を作成する。
 	//
 	// このメソッドは任意に設定する際の煩わしさを軽減するのが目的で、このメソッドを使わなくても同じ設定をすることは可能。
+	//
+	// 第四引数 replacer は、インスタンス間で値を共有するための擬似的な仕組みだったが、
+	// オブジェクト Pattern により、この引数なしでも値を共有することができるようになったため、
+	// 今のところ変更に伴う検証のコストを忌避してそのままにしているが、
+	// 仕様が難解なのと実装も複雑で、現状不要になっているように思われることもあり、保守性の観点からも取り除いた方が良いように思われる。
 	setByPrecedence(precedenceDescriptors, esc, defaultThis = this, replacer, dict, terms = this) {
 		
 		Array.isArray(precedenceDescriptors) || (precedenceDescriptors = [ precedenceDescriptors ]);
@@ -1005,7 +992,7 @@ export class Terms extends Array {
 		const l = precedenceDescriptors.length, clones = replacer?.[Term.clones];
 		let i,ti, pd, term,replaces, callback;
 		
-		i = -1, ti = this.length - 1,hi(esc);
+		i = -1, ti = this.length - 1;
 		esc = esc instanceof Sequence ? esc : typeof esc === 'string' ? new Sequence(esc) : undefined,
 		replacer || typeof replacer === 'object' || (replacer = undefined);
 		while (++i < l) {
@@ -1175,13 +1162,6 @@ export class Terms extends Array {
 		return { masks, any };
 		
 	}
-	//exec(term, defaultValue = '', ...args) {
-	//	
-	//	const callback = term[Terms.callback];
-	//	
-	//	return callback ? Array.isArray(callback[2]) ? Reflect.apply(callback[0], callback[1], [ ...callback[2], ...args ]) : Reflect.apply(callback[0], callback[1], args) : defaultValue;
-	//	
-	//}
 	
 	split(str, limit, separator) {
 		
@@ -1261,17 +1241,6 @@ export class Terms extends Array {
 // 	[ParseHelper.symbol.after]
 export class ParseHelper extends Terms {
 	
-	//static setTermTo(precedenceDescriptors, name, term) {
-	//	
-	//	const l = precedenceDescriptors.length;
-	//	let i, pd;
-	//	
-	//	i = -1;
-	//	while (++i < l)	if ((pd = precedenceDescriptors[i]).constructor === Array)
-	//								ParseHelper.setTermTo(pd, name, term);
-	//							else if (pd && typeof pd === 'object' && pd.name === name && (pd.term = term)) return;
-	//	
-	//}
 	static setSymbols(target) {
 		
 		const	symbolNamesRaw = target?.[this.symbolNames],
@@ -1288,32 +1257,9 @@ export class ParseHelper extends Terms {
 		while (++i < l)
 			(sn = symbolNames[i]) && typeof sn === 'string' && typeof s[sn] !== 'symbol' && (s[sn] = Symbol(sn));
 		
-		// precedence は ParseHelper ではなく Terms のための設定記述子になったので、以下は不要に思われる。
-		//sn = ParseHelper.setPrecedenceSymbols(target[ParseHelper.symbol.precedenceDescriptors]);
-		//for (k in sn) s[k] = sn[k];
-		
 		return s;
 		
 	}
-	//static setPrecedenceSymbols(pd) {
-	//	
-	//	if (!Array.isArray(pd)) return {};
-	//	
-	//	const l = pd.length, s = {};
-	//	let i;
-	//	
-	//	i = -1;
-	//	while (++i < l) {
-	//		if (Array.isArray(pd[i])) {
-	//			s = { ...s, ...ParseHelper.setPrecedenceSymbols(pd[i]) };
-	//		} else if (pd[i] && typeof pd[i] === 'object' && typeof pd[i].name === 'symbol') {
-	//			s[Symbol.keyFor(pd[i].name)] = pd[i].name;
-	//		}
-	//	}
-	//	
-	//	return s;
-	//	
-	//}
 	static {
 		
 		this.escOwners = Symbol('ParseHelper.escOwners'),
@@ -1346,7 +1292,6 @@ export class ParseHelper extends Terms {
 		
 	};
 	
-	//constructor(precedenceRemapper, esc = this.constructor.esc) {
 	constructor(configuration, constructor = ParseHelper, dict) {
 		
 		Array.isArray(configuration) && (configuration = { precedence: configuration }),
@@ -1357,12 +1302,6 @@ export class ParseHelper extends Terms {
 		configuration.dict = { ...(dict ||= {}), ...(configuration?.dict ?? {}) },
 		
 		super(configuration);
-		
-		//this.super = [],
-		//this.map = new Map(),
-		
-		//this.setByPrecedence(this.constructor[ParseHelper.symbol.precedenceDescriptors], esc);
-		//this.remapPrecedenceTerm(precedenceRemapper, esc);
 		
 	}
 	
@@ -1385,13 +1324,6 @@ export class ParseHelper extends Terms {
 		const parsed = [], { before, main, after, deletes, splices, passthrough } = ParseHelper;
 		let i,l, v;
 		
-		//if (Array.isArray(this.super)) {
-		//	
-		//	i = -1, l = this.super.length;
-		//	while (++i < l) (i0 = precedence.indexOf(this.super[i])) === -1 || masks.splice(i0, 1);
-		//	
-		//}
-		
 		l = plot.length;
 		
 		if (typeof this[before] === 'function') {
@@ -1413,7 +1345,9 @@ export class ParseHelper extends Terms {
 				
 				if (Array.isArray(v) && v.hasOwnProperty(splices) && v.length) {
 					
-					pi = parsed.push(...v) - 1;
+					//pi = parsed.push(...v) - 1;
+					parsed.splice(...v),
+					pi = parsed.length - 1;
 					
 				} else if (v === deletes) {
 					
@@ -1486,17 +1420,6 @@ export class Strings {
 	
 	static {
 		
-		this.options = {
-			
-			dup(numbers, separator) {
-				
-				this[Composer.repetition] = Number.isNaN(numbers = +numbers|0) ? 1 : Math.max(numbers, 0),
-				this[Composer.separator] = separator;
-				
-			}
-			
-		};
-		
 		const escaped = this.escaped = {
 			
 			squareBracketLeft: '[',
@@ -1566,11 +1489,13 @@ export class Strings {
 				};
 		
 		dict.referenceLeft = [ dict.referenceSign, dict.bracketLeft ],
-		dict.referenceRight = dict.bracketRight;
+		dict.referenceRight = dict.bracketRight,
+		
+		dict.blank = dict.space;
 		
 	}
 	
-	constructor(sp, exp, desc) {
+	constructor(sp, exp, opt, desc) {
 		
 		const { symbol } = ParseHelper, { dict } = Strings;
 		let k;
@@ -1585,8 +1510,6 @@ export class Strings {
 		}
 		
 		this.sp = sp;
-		
-		const sps = StringsParser[ParseHelper.symbol], es = StringsExpression[ParseHelper.symbol];
 		
 		if (!(exp instanceof StringsExpression)) {
 			
@@ -1609,13 +1532,21 @@ export class Strings {
 		//hi(exp[0][0].patterns[0],Strings.escaped.singleQuotationMark === dict.stringLeft);
 		//hi(sp.get('[a=b:c:d]'), sp.get('[a:d]'));
 		
-		this.optionsSeparator = new Chr(/[\s\t]+/g),
-		this.optionsMasks = this.exp[es.grp],
+		if (!(opt instanceof StringsOption)) {
+			
+			const opts = StringsOption[symbol], d = {};
+			
+			for (k in dict) d[opts[k]] = dict[k];
+			opt = new StringsOption(opt, d);
+			
+		}
+		
+		this.opt = opt,
 		
 		this.desc = desc instanceof StringsDescriptor ? desc : new StringsDescriptor(),
 		
-		this.assigned = {},
-		this.unlabels = [];
+		this.boundEvaluate = this.evaluate.bind(this),
+		this.assigned = {};
 		
 	}
 	
@@ -1623,66 +1554,41 @@ export class Strings {
 		
 		(assigned && typeof assigned === 'object') || (assigned = { [StringsExpression.anonAssignKey]: assigned });
 		
-		const	parameters = this.sp.get(str, assigned), pl = parameters.length, esc = this.sp.esc,
+		const	parameters = this.sp.get(str, assigned), l = parameters.length,
+				esc = this.sp.esc,
 				spNests = StringsParser.nests,
-				{ evaluates, refers } = StringsParser,
-				{ nests, anonAssignKey } = StringsExpression,
-				syntaxError = ParseHelper.syntaxError;
-		let i,i0,l0,v,k, p, opts,optsAssigned;
+				{ assignedIndex, evaluates, refers } = StringsParser,
+				{ anonAssignKey, getExecutor, nests } = StringsExpression;
+		let i,v, p;
 		
 		i = -1;
-		while (++i < pl) {
+		while (++i < l) {
 			
 			if (!(p = parameters[i]) || typeof p !== 'object') continue;
 			
 			if (p instanceof String) {
 				
 				parameters[i] = {
-					v:	p[spNests] ? this.get(p, assigned) :
-						p[evaluates] ? StringsExpression.getExecutor(p, 'assigned')?.(assigned) :
-						p[refers] ?  (p += '', p ||= anonAssignKey) in assigned ? assigned[p] :
-							p in assigned[StringsParser.assignedIndex] ? assigned[assigned[StringsParser.assignedIndex][p]] :
-							'' :
-						''+p
+					v:	p[spNests] ?
+							this.get(p, assigned) :
+							p[evaluates] ?
+									getExecutor(p, 'assigned')?.(assigned) :
+									p[refers] ?
+										(p += '', p ||= anonAssignKey) in assigned ?
+											assigned[p] :
+											p in assigned[assignedIndex] ? assigned[assigned[assignedIndex][p]] : '' :
+							''+p
 				};
+				
 				continue;
 				
 			}
 			
-			p.muted && (p = p.muted);
-			
-			if (Array.isArray(opts = p.options)) {
-				
-				i0 = -1, l0 = opts.length;
-				while (++i0 < l0) {
-					
-					if (Array.isArray(opts[i0]) && ((opts[i0] = this.parseArgs(opts[i0], assigned)) === syntaxError)) {
-						parameters[i] = p.source;
-						break;
-					}
-					
-				}
-				if (i0 < l0) continue;
-				
-			}
-			
-			if (opts = p.options) {
-				
-				optsAssigned = {};
-				for (k in Strings.options)
-					typeof Strings.options[k] === 'function' && (optsAssigned[k] = Strings.options[k].bind(p));
-				optsAssigned = { ...assigned, ...optsAssigned };
-				i0 = -1,
-				l0 = (opts = this.optionsSeparator.split(opts, undefined, this.optionsMasks.locate(opts).completed)).length;
-				while (++i0 < l0) this.evaluate(opts[i0], optsAssigned);
-				
-			}
-			
+			(v = p.muted) && (p = v),
+			(v = p.options) && this.opt.exec(v, this.boundEvaluate, assigned, p),
 			p.args &&= this.evaluate(p.args, assigned),
-			
 			p.v = this.desc.get(p, assigned),
-			
-			p.label !== null && assigned && typeof assigned === 'object' && (assigned[p.label || anonAssignKey] = p.v);
+			(v = p.label) !== null && (assigned[v || anonAssignKey] = p.v);
 			
 		}
 		
@@ -1690,7 +1596,7 @@ export class Strings {
 		
 		const	composed = Composer.compose(parameters),
 				cl = composed.length,
-				escs = new Set([ ...this.sp.fetchEscs(), ...this.exp.fetchEscs(), this.optionsSeparator.seq, this.optionsMasks.seq ]);
+				escs = new Set([ ...this.sp.fetchEscs(), ...this.exp.fetchEscs(), ...this.opt.fetchEscs() ]);
 		
 		for (v of escs) {
 			if (!v) continue;
@@ -1718,6 +1624,125 @@ export class Strings {
 		while (++i < l && (arg = args[i]) !== syntaxError) arg?.[nests] && (args[i] = this.get(arg, assigned));
 		
 		return i === l ? args : syntaxError;
+		
+	}
+	
+}
+
+export class StringsOption extends ParseHelper {
+	
+	static arg(mask, masks, input, detail, self) {
+		
+		return new String(mask.$.trim());
+		
+	}
+	
+	static {
+		
+		this.anon = Symbol('StringsOption.anon'),
+		this.bound = Symbol('StringsOption.bound'),
+		
+		this[ParseHelper.symbolNames] = [ 'arg', 'spc', 'groupLeft', 'groupRight', 'blank' ];
+		
+		const	s = ParseHelper.setSymbols(this),
+				dict = this.dict =	{
+												[s.groupLeft]: new Pattern('('),
+												[s.groupRight]: new Pattern(')'),
+												[s.blank]: /[\s\t]+/g
+											};
+		
+		this[ParseHelper.precedenceDescriptors] = [
+			{ name: s.arg, term: [ s.groupLeft, s.groupRight ], callback: StringsOption.arg },
+			{ name: s.spc, term: [ s.blank ], callback: Term.deletes }
+		];
+		
+	}
+	
+	constructor(configuration, dict) {
+		
+		const s = StringsParser[ParseHelper.symbol];
+		
+		super(
+			configuration,
+			StringsOption,
+			{ ...StringsOption.dict, ...(dict && typeof dict === 'object' ? dict : {}) }
+		),
+		
+		this.registered = {},
+		
+		this[ParseHelper.escOwners] = [];
+		
+	}
+	
+	[ParseHelper.main](block, parsed, plot, plotLength, input, detail, self) {
+		
+		if (block instanceof String) {
+		
+			const	{ length } = parsed, l0 = length - 1, prev = l0 > -1 && typeof parsed[l0] === 'string' && parsed[l0];
+			
+			prev && ((block = [ l0, 1, prev + block ])[ParseHelper.splices] = true);
+			
+		}
+		
+		return block;
+		
+	}
+	
+	register(handler, handlerValue, binds) {
+		
+		const { registered } = this, { isArray } = Array, { bound, anon } = StringsOption;
+		
+		if (isArray((typeof handler === 'object' && handler) || (handler = [ handler ]))) {
+			
+			const l = handler.length;
+			let i;
+			
+			i = -1, binds && isArray(handlerValue) && (handlerValue[bound] = binds);
+			while (++i < l) registered[handler[i] || anon] = handlerValue;
+			
+		} else {
+			
+			let k,v;
+			
+			for (k in handler) v = registered[k] = handler[k], binds && isArray(v) && (v[bound] = binds);
+			
+		}
+		
+	}
+	removeHandlers(...names) {
+		
+		const l = names.length, { registered } = this;
+		let i;
+		
+		i = -1;
+		while (++i < l) delete registered[names[i]];
+		
+	}
+	//removeMatchedHandlers(value) {
+	//	
+	//	const { registered } = this;
+	//	let k;
+	//	
+	//	for (k in registered) registered[k] === value && delete registered[k];
+	//	
+	//}
+	
+	exec(str, callback, assigned, thisArg = this) {
+		
+		if (!str || typeof callback !== 'function') return;
+		
+		const opts = this.get(str, assigned), l = opts.length;
+		
+		if (!l) return;
+		
+		const	{ registered } = this, { bound } = StringsOption, assignedHandler = {}, binder = [ null, thisArg ];
+		let i,k,v;
+		
+		for (k in registered) typeof (v = registered[k]) === 'function' && (binder[0] = v, v = binder),
+			assignedHandler[k] = v === binder || v?.[bound] ? (v[1] ||= thisArg, v[0].bind(v[1], v[2])) : v;
+		
+		i = -1, assigned = { ...assigned, ...assignedHandler };
+		while (++i < l) (v = opts[i]) && callback(v, assigned);
 		
 	}
 	
@@ -1852,24 +1877,6 @@ export class StringsParser extends ParseHelper {
 		dict[s.referenceRight] = dict[s.bracketRight],
 		dict[s.assignment] = [ '(?:', dict[s.mute], '|', dict[s.separator], '|', dict[s.disable], ')' ],
 		
-		//	new Chr(new RegExp(`[${Unit.escapeRegExpPattern(this.syx.mute + this.syx.separator + this.syx.disable)}]`, 'g'));
-		//(this.syx = {
-		//	str: [ Strings.str[0], Strings.str[1] ],
-		//	nest: [ '<', '>' ],
-		//	evl: [ '`', '`' ],
-		//	ref: [ '$[', ']' ],
-		//	l: '[',
-		//	r: ']',
-		//	assign: '=',
-		//	mute: ';',
-		//	separator: ':',
-		//	disable: '!',
-		//	comma: new Chr(/[\n\s\t]*,[\n\s\t]*/g),
-		//	//space: new Chr(/[\n\s\t]+/g)
-		//}).assignment =
-		//	new Chr([ '(?:', new Pattern(this.syx.mute), '|', new Pattern(this.syx.separator), '|', new Pattern(this.syx.disable), ')' ]);
-		//	//new Chr(new RegExp(`[${Unit.escapeRegExpPattern(this.syx.mute + this.syx.separator + this.syx.disable)}]`, 'g'));
-		
 		this[ParseHelper.precedenceDescriptors] = [
 			{ name: s.str, term: [ s.stringLeft, s.stringRight ], unmasks: true },
 			{ name: s.ref, term: [ s.referenceLeft, s.referenceRight ], callback: StringsParser.reference },
@@ -1900,19 +1907,8 @@ export class StringsParser extends ParseHelper {
 			{ ...StringsParser.dict, ...(dict && typeof dict === 'object' ? dict : {}) }
 		),
 		
-		this.paramMask =	new Terms({
-									precedence: StringsParser.parameterPrecedence,
-									defaultThis: this,
-									replacer: {
-										[Term.clones]: true,
-										[s.str]: this[s.str],
-										[s.ref]: this[s.ref],
-										[s.nst]: this[s.nst],
-										[s.evl]: this[s.evl],
-										[s.syx]: this[s.syx]
-									},
-									dict: this[Terms.dict]
-								}),
+		this.paramMask =
+			new Terms({ precedence: StringsParser.parameterPrecedence, defaultThis: this, dict: this[Terms.dict] }),
 		
 		this[ParseHelper.escOwners] = [ this.paramMask ];
 		
@@ -2191,8 +2187,7 @@ export class StringsExpression extends ParseHelper {
 		
 		const	{ bound, cursor, isGroup, nests, opsPrecedence, splices } = StringsExpression,
 				ol = opsPrecedence.length,
-				splice = Array.prototype.splice,
-				{ cmm } = StringsExpression[ParseHelper.symbol];
+				splice = Array.prototype.splice;
 		let i,l,i0, x,x0, xl,xl0, op,v, li,ri, spliceArgsLength, sym,cb,hasCb;
 		
 		xl = exp.length;
@@ -2366,6 +2361,23 @@ export class StringsDescriptor {
 
 const strings = new Strings();
 export default strings.get.bind(strings);
+
+// Options
+
+class OptionDuplicator {
+	
+	static dup(numbers, separator) {
+		
+		this[Composer.repetition] = Number.isNaN(numbers = +numbers|0) ? 1 : Math.max(numbers, 0),
+		this[Composer.separator] = separator;
+		
+	}
+	
+}
+strings.opt.register([ 'dup' ], [ OptionDuplicator.dup ], true);
+
+// Functions
+
 class Counter {
 	
 	static describe(from, to, value, pad, padString, parameter, assigned) {
