@@ -228,12 +228,24 @@ export class Sequence extends Unit {
 		
 	}
 	
-	// 第一引数 str に与えられた文字列の中から、this.seq が示す正規表現に一致する文字列の位置情報を列挙した配列を返す。
-	// str と seq との一致判定処理は String.prototype.matchAll によって行なわれる。
-	// this.repetition に有効な値が設定されている場合、一致した文字列が連続して連なっていると、それらの位置情報を結合する。
-	// その際、結合した位置情報に、連なり内の一致文字列の連続回数を整数値で示すプロパティ sequence が設定される。
-	// 既定ではこの連なりの位置情報は戻り値には含まれない。
-	// この情報を戻り値に含ませる場合、第二引数 includesRepetition に真を示す値を指定する。
+	// 第一引数 str に与えられた文字列に対して、インスタンスのプロパティ unit が示す RegExp で String.prototype.matchAll を実行し、
+	// その戻り値の各要素に、このインスタンスに設定された情報に基づいた以下のプロパティを作成して、それらをキャッシュする。
+	// これらのプロパティは、異なる一致が隣り合わせになって連なっている場合に、その連なりを構成する要素に対して作成される。
+	// 	unit
+	// 		連なりの先頭部分の一致部分全体を示す。このプロパティが示す文字列の長さは、
+	// 		Sequence.prototype.replace 内で、連なりを count の値だけ短縮させる時の基準として使われる。
+	// 		そのため、仮にインスタンスのプロパティ unit の正規表現が、不特定の長さで一致を取得し得る場合、
+	// 		このプロパティの値および Sequence.prototype.replace の結果が意味のないものになるかもしれない。
+	// 		これを仕様とするか欠陥として対応するかは検討中。
+	// 	count
+	// 		連なりの回数を示す数値。仮にインスタンスのプロパティ repetition が 3 で、一致が 6 つ連なっている場合、
+	// 		このプロパティは 2 を示す。
+	// このメソッドの戻り値および Sequence そのものは、文字列のエスケープ判定に使うことを想定している。
+	// 例えば上記の連なりは、エスケープシーケンスをエスケープしている箇所と捉えることができる。
+	// 逆に言えば、それ以外の要素は直後の文字をエスケープしていると看做すことができる。
+	// 第二引数 excludesRepetition に真を示す値を指定すると、戻り値から連なりを示す要素を取り除いた一致情報を配列に列挙して返す。
+	// この時の戻り値は、エスケープされている部分の情報のみが戻り値に含まれていると解釈することができる。
+	// このメソッドの実行結果はキャッシュされ、インスタンスの情報と str に変化がなければ、二回目以降の実行は常にキャッシュを返す。
 	index(str, excludesRepetition) {
 		
 		if (str in this.cache)
@@ -269,7 +281,6 @@ export class Sequence extends Unit {
 				l1 = i + (cnt = repetition * (times / repetition | 0)), m.count = cnt / repetition;
 				while (++i1 < l1) m0 += (m1 = matched[i1])[0], m1.length > 1 && m.push(...m1.slice(1));
 				m[0] = m0, i1 === i0 || (ii = indices.push(...matched.slice(i1, i0)) - 1);
-				//hi(m0,m.count, m, m[0].slice(0, (m.unit.length * m.count)));
 				
 			}
 			
@@ -370,6 +381,8 @@ export class Chr extends Unit {
 	// str の中から、インスタンスのプロパティ unit に一致する文字列が、masks が示す文字列範囲外に存在するかどうかを真偽値で返す。
 	// Chr.prototype.index に少し似ているが、文字列の一致の確認だけ目的の場合、
 	// index はこのメソッドと比べて冗長で不要な情報を多く含んだ戻り値を作成する。
+	// *上記説明をいつ書いたか定かではないが、この処理内で Chr.prototype.index を実行しているため、的外れのように思える。
+	// 恐らく Chr.prototype.mask の間違い。
 	test(str, ...masks) {
 		
 		const indexed = this.index(str), l = indexed?.length, l0 = masks.length;
@@ -393,8 +406,6 @@ export class Chr extends Unit {
 		}
 		
 		return false;
-		
-		
 		
 	}
 	// 第一引数 str でこのインスタンスのメソッド match を実行した結果から、
@@ -462,18 +473,6 @@ export class Chr extends Unit {
 		
 	}
 	
-	//clone(seq) {
-	//	
-	//	const { unit, matchesEmpty } = this;
-	//	
-	//	return new Chr(
-	//			{ pattern: unit.source, flags: unit.flags, unescapes: true },
-	//			(seq = arguments.length ? seq : this.seq) instanceof Sequence ?
-	//				{ pattern: seq.unit.source, flags: seq.unit.flags, repetition: seq.repetition, unescapes: true } : null,
-	//			matchesEmpty
-	//		);
-	//	
-	//}
 	equals(chr) {
 		
 		if (!(chr instanceof Chr)) return false;
