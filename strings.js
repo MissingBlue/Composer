@@ -206,7 +206,7 @@ export class Sequence extends Unit {
 	
 	static repetition = 2;
 	static cacheHandler(match) {
-		return !('sequence' in match);
+		return !('unit' in match);
 	}
 	
 	constructor(unit, flags, repetition) {
@@ -234,16 +234,17 @@ export class Sequence extends Unit {
 	// その際、結合した位置情報に、連なり内の一致文字列の連続回数を整数値で示すプロパティ sequence が設定される。
 	// 既定ではこの連なりの位置情報は戻り値には含まれない。
 	// この情報を戻り値に含ませる場合、第二引数 includesRepetition に真を示す値を指定する。
-	index(str, includesRepetition) {
+	index(str, excludesRepetition) {
 		
-		if (str in this.cache) return this.cache[str];
+		if (str in this.cache)
+			return excludesRepetition ? this.cache[str][Indexer.indexed].get(Sequence.cacheHandler) : this.cache[str];
 		
 		const matched = [ ...str.matchAll(this.unit) ], l = matched.length;
 		
 		if (!l) return this.setCache(matched, Sequence.cacheHandler);
 		
-		const indices = [], repetition = this.repetition;
-		let i,i0,l0,i1,l1,i2,l2, m,m0,mi, ii, times,outOfRepetition,cnt;
+		const indices = [], { repetition } = this;
+		let i,i0,l0,i1,l1, m,m0,m1, ii, times,cnt;
 		
 		i = ii = -1;
 		while (++i < l) {
@@ -264,32 +265,11 @@ export class Sequence extends Unit {
 				// 一致した文字列の連なりが規定の繰り返し回数を満たす時。
 				// 繰り返しは左方から順に数えられ、連なりの終端までに繰り返しに端数が出た場合、それらは連なり外の個別の一致として記録される。
 				
-				outOfRepetition = i + times - (cnt = repetition * parseInt(times / repetition));
-				
-				if (includesRepetition) {
-					
-					i1 = i - 1, l1 = i0 - outOfRepetition;
-					while (++i1 < l1) {
-						
-						if ((i1 - outOfRepetition) % cnt)
-							(indices[++ii] = (m = matched[i1])).sequence = repetition, mi = m.length;
-						else {
-							
-							m[0] += (m0 = matched[i1])[0];
-							
-							if (l2 = m0.length) {
-								i2 = 0;
-								while (++i2 < l2) m[++mi] = m0[i2];
-							}
-							
-						}
-						
-					}
-					
-				}
-				
-				i1 = i0 - outOfRepetition - 1;
-				while (++i1 < i0) indices[++ii] = matched[i1];
+				m0 = (indices[++ii] = m = matched[i1 = i])[0], m.unit = m0,
+				l1 = i + (cnt = repetition * (times / repetition | 0)), m.count = cnt / repetition;
+				while (++i1 < l1) m0 += (m1 = matched[i1])[0], m1.length > 1 && m.push(...m1.slice(1));
+				m[0] = m0, i1 === i0 || (ii = indices.push(...matched.slice(i1, i0)) - 1);
+				//hi(m0,m.count, m, m[0].slice(0, (m.unit.length * m.count)));
 				
 			}
 			
@@ -297,18 +277,17 @@ export class Sequence extends Unit {
 			
 		}
 		
-		return this.setCache(indices, Sequence.cacheHandler);
+		return this.setCache(indices, Sequence.cacheHandler), this.index(str, excludesRepetition);
 		
 	}
 	replace(str, replacer = '') {
 		
-		const	matched = this.index(str, true)[Indexer.indexed].get(Sequence.cacheHandler),
-				l = matched.length, u = this.unit;
+		const	matched = this.index(str), l = matched.length, u = this.unit;
 		let i,m,lm, replaced;
 		
 		i = -1, replaced = '';
-		while (++i < l) replaced += str.substring(lm ? lm.index + lm[0].length : 0,
-			(m = matched[i]).index) + ('sequence' in (lm = m) ? m[0].substring(0, m[0].length / m.sequence) : m[0].replaceAll(u, replacer));
+		while (++i < l) replaced += str.substring(lm ? lm.index + lm[0].length : 0, (m = matched[i]).index) +
+			('unit' in (lm = m) ? m[0].slice(0, m.unit.length * m.count) : m[0].replaceAll(u, replacer));
 		
 		return replaced += lm ? str.substring(lm.index + lm[0].length) : str;
 		
@@ -365,8 +344,7 @@ export class Chr extends Unit {
 		if (k in this.cache) return this.cache[k];
 		
 		const	matched = [ ...str.matchAll(this.matchesEmpty ? this.unit : this) ],
-				l = matched.length,
-				seqs = l && this.seq?.index?.(str, true)?.[Indexer.indexed]?.get?.(Sequence.cacheHandler);
+				l = matched.length, seqs = l && this.seq?.index?.(str, true);
 		
 		if (!seqs) return this.setCache(matched);
 		
@@ -394,8 +372,7 @@ export class Chr extends Unit {
 	// index はこのメソッドと比べて冗長で不要な情報を多く含んだ戻り値を作成する。
 	test(str, ...masks) {
 		
-		const	indexed = this.index(str),
-				l = indexed?.length, l0 = masks.length;
+		const indexed = this.index(str), l = indexed?.length, l0 = masks.length;
 		
 		if (!l0) return !!l;
 		
@@ -1262,6 +1239,20 @@ export class ParseHelper extends Terms {
 		return s;
 		
 	}
+	
+	static normalizeConfiguration(configuration, constructor, esc, dict) {
+		
+		Array.isArray(configuration) && (configuration = { precedence: configuration }),
+		(configuration && configuration.constructor === Object) || (configuration = {}),
+		
+		configuration.precedence ||= constructor[ParseHelper.precedenceDescriptors],
+		'esc' in configuration || (configuration.esc = esc || constructor[ParseHelper.esc]),
+		configuration.dict = { ...(configuration?.dict ?? {}), ...(dict ||= {}) };
+		
+		return configuration;
+		
+	}
+	
 	static {
 		
 		this.escOwners = Symbol('ParseHelper.escOwners'),
@@ -1294,16 +1285,9 @@ export class ParseHelper extends Terms {
 		
 	};
 	
-	constructor(configuration, constructor = ParseHelper, dict) {
+	constructor(configuration, constructor = ParseHelper, esc, dict) {
 		
-		Array.isArray(configuration) && (configuration = { precedence: configuration }),
-		(!configuration || configuration.constructor !== Object) && (configuration = {}),
-		
-		configuration.precedence ||= constructor[ParseHelper.precedenceDescriptors],
-		'esc' in configuration || (configuration.esc = constructor[ParseHelper.esc]),
-		configuration.dict = { ...(dict ||= {}), ...(configuration?.dict ?? {}) },
-		
-		super(configuration);
+		super(ParseHelper.normalizeConfiguration(configuration, constructor, esc, dict));
 		
 	}
 	
@@ -1497,53 +1481,28 @@ export class Strings {
 		
 	}
 	
-	constructor(sp, exp, opt, desc) {
+	static createDict(indexOfSymbol, dict = {}, source = Strings.dict) {
 		
-		const { symbol } = ParseHelper, { dict } = Strings;
 		let k;
 		
-		if (!(sp instanceof StringsParser)) {
-			
-			const sps = StringsParser[symbol], d = {};
-			
-			for (k in dict) d[sps[k]] = dict[k];
-			sp = new StringsParser(sp, d);
-			
-		}
+		for (k in source) dict[indexOfSymbol[k]] = source[k];
 		
-		this.sp = sp;
+		return dict;
 		
-		if (!(exp instanceof StringsExpression)) {
-			
-			const exps = StringsExpression[symbol], d = {};
-			
-			for (k in dict) d[exps[k]] = dict[k];
-			exp = new StringsExpression(exp, d);
-			
-		}
+	}
+	
+	constructor(sp, exp, opt, desc, esc = new Sequence('\\\\')) {
 		
-		this.exp = exp;
+		const { symbol } = ParseHelper, { createDict, dict } = Strings;
 		
-		//hi(sp);
-		//hi(sp[1][0].unit,sp[0][0].patterns[0]);
-		////hi(sp);
-		//Strings.escaped.singleQuotationMark.str = '@';
-		//hi(sp[0][0].patterns[0],Strings.escaped.singleQuotationMark === dict.stringLeft);
-		//hi(sp.get('[a=b:c:d]'), sp.get('[a:d]'));
+		this.sp = sp instanceof StringsParser ?
+			sp : new StringsParser(sp, esc, createDict(StringsParser[symbol])),
 		
-		//hi(exp[0][0].patterns[0],Strings.escaped.singleQuotationMark === dict.stringLeft);
-		//hi(sp.get('[a=b:c:d]'), sp.get('[a:d]'));
+		this.exp = exp instanceof StringsExpression ?
+			exp : new StringsExpression(exp, esc, createDict(StringsExpression[symbol])),
 		
-		if (!(opt instanceof StringsOption)) {
-			
-			const opts = StringsOption[symbol], d = {};
-			
-			for (k in dict) d[opts[k]] = dict[k];
-			opt = new StringsOption(opt, d);
-			
-		}
-		
-		this.opt = opt,
+		this.opt = opt instanceof StringsOption ?
+			opt : new StringsOption(opt, esc, createDict(StringsOption[symbol])),
 		
 		this.desc = desc instanceof StringsDescriptor ? desc : new StringsDescriptor(),
 		
@@ -1601,7 +1560,7 @@ export class Strings {
 				escs = new Set([ ...this.sp.fetchEscs(), ...this.exp.fetchEscs(), ...this.opt.fetchEscs() ]);
 		
 		for (v of escs) {
-			if (!v) continue;
+			if (!(v instanceof Sequence)) continue;
 			i = -1;
 			while (++i < cl) composed[i] = v.replace(composed[i]);
 		}
@@ -1660,13 +1619,14 @@ export class StringsOption extends ParseHelper {
 		
 	}
 	
-	constructor(configuration, dict) {
+	constructor(configuration, esc, dict) {
 		
 		const s = StringsParser[ParseHelper.symbol];
 		
 		super(
 			configuration,
 			StringsOption,
+			esc,
 			{ ...StringsOption.dict, ...(dict && typeof dict === 'object' ? dict : {}) }
 		),
 		
@@ -1899,13 +1859,14 @@ export class StringsParser extends ParseHelper {
 		
 	}
 	
-	constructor(configuration, dict) {
+	constructor(configuration, esc, dict) {
 		
 		const s = StringsParser[ParseHelper.symbol];
 		
 		super(
 			configuration,
 			StringsParser,
+			esc,
 			{ ...StringsParser.dict, ...(dict && typeof dict === 'object' ? dict : {}) }
 		),
 		
@@ -2173,11 +2134,12 @@ export class StringsExpression extends ParseHelper {
 		
 	}
 	
-	constructor(configuration, dict) {
+	constructor(configuration, esc, dict) {
 		
 		super(
 			configuration,
 			StringsExpression,
+			esc,
 			{ ...StringsExpression.dict, ...(dict && typeof dict === 'object' ? dict : {}) }
 		),
 		
