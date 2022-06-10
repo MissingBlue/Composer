@@ -206,7 +206,7 @@ export class Sequence extends Unit {
 	
 	static repetition = 2;
 	static cacheHandler(match) {
-		return !('unit' in match);
+		return !('units' in match);
 	}
 	
 	constructor(unit, flags, repetition) {
@@ -229,17 +229,10 @@ export class Sequence extends Unit {
 	}
 	
 	// 第一引数 str に与えられた文字列に対して、インスタンスのプロパティ unit が示す RegExp で String.prototype.matchAll を実行し、
-	// その戻り値の各要素に、このインスタンスに設定された情報に基づいた以下のプロパティを作成して、それらをキャッシュする。
-	// これらのプロパティは、異なる一致が隣り合わせになって連なっている場合に、その連なりを構成する要素に対して作成される。
-	// 	unit
-	// 		連なりの先頭部分の一致部分全体を示す。このプロパティが示す文字列の長さは、
-	// 		Sequence.prototype.replace 内で、連なりを count の値だけ短縮させる時の基準として使われる。
-	// 		そのため、仮にインスタンスのプロパティ unit の正規表現が、不特定の長さで一致を取得し得る場合、
-	// 		このプロパティの値および Sequence.prototype.replace の結果が意味のないものになるかもしれない。
-	// 		これを仕様とするか欠陥として対応するかは検討中。
-	// 	count
-	// 		連なりの回数を示す数値。仮にインスタンスのプロパティ repetition が 3 で、一致が 6 つ連なっている場合、
-	// 		このプロパティは 2 を示す。
+	// その戻り値の各要素から、一致が連なっている要素を見つけ出し、その連なりを構成する要素をグループ化する。
+	// グループ化された要素には以下のプロパティが設定される。
+	// 	units
+	// 		連なりを構成する要素を列挙した配列。
 	// このメソッドの戻り値および Sequence そのものは、文字列のエスケープ判定に使うことを想定している。
 	// 例えば上記の連なりは、エスケープシーケンスをエスケープしている箇所と捉えることができる。
 	// 逆に言えば、それ以外の要素は直後の文字をエスケープしていると看做すことができる。
@@ -256,31 +249,42 @@ export class Sequence extends Unit {
 		if (!l) return this.setCache(matched, Sequence.cacheHandler);
 		
 		const indices = [], { repetition } = this;
-		let i,i0,l0,i1,l1, m,m0,m1, ii, times,cnt;
+		let i,i0,l0,i1,l1,k, m,m0,m1, u,ui,units, ii, times;
 		
 		i = ii = -1;
 		while (++i < l) {
 			
-			i0 = i;
-			while (++i0 < l && (m = matched[i0 - 1]).index + m[0].length === matched[i0].index);
+			if ((l0 = i + repetition) <= l) {
+				
+				i0 = i;
+				while (++i0 < l0 && (m = matched[i0 - 1]).index + m[0].length === matched[i0].index);
+				
+			} else i0 = l;
 			
-			if ((times = i0 - i) < repetition) {
+			if ((times = i0 - i) === repetition) {
+				
+				// 一致した文字列の連なりが規定の繰り返し回数を満たす時。
+				// 繰り返しは左方から順に数えられ、連なりの終端までに繰り返しに端数が出た場合、それらは連なり外の個別の一致として記録される。
+				
+				//l1 = i + repetition * (cnt = m.count = times / repetition | 0),
+				//l1 === i0 ? (i1 = i) : (ii = indices.push(...matched.slice(i, i1 = i + (i0 - l1))) - 1),
+				//m0 = (indices[++ii] = m = matched[i1])[0], (u = m.units = [])[ui = 0] = m0;
+				//while (++i1 < i0) m0 += (u[++ui] = (m1 = matched[i1])[0]), m1.length > 1 && m.push(...m1.slice(1));
+				//m[0] = m.entire = m0;
+				m = matched[i1 = i], u = [];
+				for (k in m) u[k] = m[k];
+				m0 = (indices[++ii] = u)[0], (units = u.units = [])[ui = 0] = m, l1 = i + repetition;
+				while (++i1 < l1) m0 += (m1 = units[++ui] = matched[i1])[0], m1.length > 1 && u.push(...m1.slice(1));
+				u[0] = m0;
+				//i1 === i0 || (ii = indices.push(...matched.slice(i1, i0)) - 1);
+				
+			} else {
 				
 				// 一致した文字列の連なりが規定の繰り返し回数以下の時。
 				// それらの一致はすべて個別の一致として記録される。
 				
 				--i;
 				while (++i < i0) indices[++ii] = matched[i];
-				
-			} else {
-				
-				// 一致した文字列の連なりが規定の繰り返し回数を満たす時。
-				// 繰り返しは左方から順に数えられ、連なりの終端までに繰り返しに端数が出た場合、それらは連なり外の個別の一致として記録される。
-				
-				m0 = (indices[++ii] = m = matched[i1 = i])[0], m.unit = m0,
-				l1 = i + (cnt = repetition * (times / repetition | 0)), m.count = cnt / repetition;
-				while (++i1 < l1) m0 += (m1 = matched[i1])[0], m1.length > 1 && m.push(...m1.slice(1));
-				m[0] = m0, i1 === i0 || (ii = indices.push(...matched.slice(i1, i0)) - 1);
 				
 			}
 			
@@ -297,8 +301,8 @@ export class Sequence extends Unit {
 		let i,m,lm, replaced;
 		
 		i = -1, replaced = '';
-		while (++i < l) replaced += str.substring(lm ? lm.index + lm[0].length : 0, (m = matched[i]).index) +
-			('unit' in (lm = m) ? m[0].slice(0, m.unit.length * m.count) : m[0].replaceAll(u, replacer));
+		while (++i < l) replaced +=	str.substring(lm ? lm.index + lm[0].length : 0, (m = matched[i]).index) +
+												('units' in (lm = m) ? m.units.at(-1)[0] : replacer);
 		
 		return replaced += lm ? str.substring(lm.index + lm[0].length) : str;
 		
@@ -921,8 +925,6 @@ export class Terms extends Array {
 	
 	constructor(configuration) {
 		
-		//this.super = [],
-		//this.callback = new Map(),
 		configuration?.constructor === Object ? (
 				configuration?.terms?.constructor === Array ? super(...configuration.terms) : super(),
 				configuration.precedence &&	this.setByPrecedence(
@@ -1403,6 +1405,16 @@ export class Strings {
 		
 	}
 	
+	static createDict(indexOfSymbol, dict = {}, source = Strings.dict) {
+		
+		let k;
+		
+		for (k in source) dict[indexOfSymbol[k]] = source[k];
+		
+		return dict;
+		
+	}
+	
 	static {
 		
 		const escaped = this.escaped = {
@@ -1480,16 +1492,6 @@ export class Strings {
 		
 	}
 	
-	static createDict(indexOfSymbol, dict = {}, source = Strings.dict) {
-		
-		let k;
-		
-		for (k in source) dict[indexOfSymbol[k]] = source[k];
-		
-		return dict;
-		
-	}
-	
 	constructor(sp, exp, opt, desc, esc = new Sequence('\\\\')) {
 		
 		const { symbol } = ParseHelper, { createDict, dict } = Strings;
@@ -1554,9 +1556,7 @@ export class Strings {
 		
 		//hi(parameters);
 		
-		const	composed = Composer.compose(parameters),
-				cl = composed.length,
-				escs = new Set([ ...this.sp.fetchEscs(), ...this.exp.fetchEscs(), ...this.opt.fetchEscs() ]);
+		const composed = Composer.compose(parameters), cl = composed.length, escs = this.sp.fetchEscs();
 		
 		for (v of escs) {
 			if (!(v instanceof Sequence)) continue;
@@ -2148,21 +2148,23 @@ export class StringsExpression extends ParseHelper {
 	
 	express(exp, args) {
 		
-		const	{ bound, cursor, isGroup, nests, opsPrecedence, splices } = StringsExpression,
-				ol = opsPrecedence.length,
-				splice = Array.prototype.splice;
-		let i,l,i0, x,x0, xl,xl0, op,v, li,ri, spliceArgsLength, sym,cb,hasCb;
+		let xl;
 		
 		xl = exp.length;
 		
-		if (exp[0]?.[nests]) return xl === 1 ?
+		if (exp[0]?.[StringsExpression.nests]) return xl === 1 ?
 			exp[0] : (console.error(new SyntaxError('Nesting value must be specified alone.')), ParseHelper.syntaxError);
+		
+		const	{ bound, cursor, isGroup, opsPrecedence, splices } = StringsExpression,
+				ol = opsPrecedence.length,
+				{ isArray } = Array, { splice } = Array.prototype;
+		let i,l,i0, x,x0, xl0, op,v, li,ri, spliceArgsLength, sym,cb,hasCb;
 		
 		i = xl;
 		while (--i > -1) {
 			typeof (x = exp[i]) === 'function' ?
 				i += 2 :
-				Array.isArray(x) && (
+				isArray(x) && (
 						typeof (x0 = exp[i0 = i - 1]) === 'function' ?
 								(exp.splice(i0, 2, x0(...x)), --xl) :
 								x[isGroup] ? (l = x.length) ? (exp[i++] = x[l - 1]) : undefined : x
@@ -2502,11 +2504,16 @@ class Selector {
 	
 	static describe(urls, selector = ':root', propertyName = [ 'innerHTML' ], rxSrc, interval = -1, timeout = 30000) {
 		
-		const reflections = [ [ Selector.select, Composer.$, ...args ] ];
+		const reflections = [ [ Selector.select, Composer.$, [ ...arguments ] ] ];
 		
 		reflections[Composer.reflections] = true;
 		
 		return reflections;
+		
+	}
+	static {
+		
+		this.describe[StringsDescriptor.variadic] = true;
 		
 	}
 	
@@ -2551,7 +2558,8 @@ class Selector {
 			
 			const	URLs = [], l = urls.length, current = location.origin + location.pathname,
 					awaits = (interval = interval|0) > -1,
-					prs = Selector.promiseRemoteSelector;
+					prs = Selector.promiseRemoteSelector,
+					values = [];
 			let i;
 			
 			i = -1;
@@ -2562,15 +2570,15 @@ class Selector {
 				
 				this[i] = awaits > -1 && i ? 
 					this[i - 1].then((url => () => new Promise(rs => setTimeout(() => prs(url, current, selector, propertyName, rxSrc, timeout, this).catch(error => error).then(v => rs(v)), interval)))(urls[i])) :
-					prs(urls[i], current, selector, propertyName, rxSrc, timeout, this);
+					prs(urls[i], current, selector, propertyName, rxSrc, timeout, values);
 				
 			}
 			
-			return this;
+			return Composer.noReturnValue;
 			
 		} else {
 			
-			return Selector.getNodesValue(document.querySelectorAll(selector), propertyName, rxSrc, this);
+			return Selector.getNodesValue(document.querySelectorAll(selector), propertyName, rxSrc, this, Composer.noReturnValue);
 			
 		}
 		
@@ -2630,7 +2638,7 @@ class Selector {
 		return promise;
 		
 	}
-	static getNodesValue(nodes = [], propertyName = [ 'innerHTML' ], rxSrc, values = []) {
+	static getNodesValue(nodes = [], propertyName = [ 'innerHTML' ], rxSrc, values = [], returnValue) {
 		
 		const	l = nodes.length,
 				requiresAttr = typeof propertyName === 'string',
@@ -2669,9 +2677,10 @@ class Selector {
 			
 		}
 		
-		return values;
+		return returnValue || values;
 		
 	}
+	
 }
 strings.register([ '$', 'dom' ], [ Selector.describe, Selector ]);
 

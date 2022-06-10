@@ -289,6 +289,12 @@ console.log(
 )
 ```
 
+### `$`, `dom` セレクター関数
+```
+[($,dom):url, selector[, propertyName = 'innerHTML' ]]
+```
+　第一引数 *url* に指定した値が示す HTML 文書から、第二引数 *selector* が示す [CSS セレクター](https://developer.mozilla.org/ja/docs/Web/CSS/CSS_Selectors) に一致する要素をすべて取得し、それらの要素の、第三引数 *propertyName* に指定した属性ないしプロパティの値を取得します。*url* が URL を示す値であれば、これらの処理は非同期で行なわれ、`strings` が返す値も Promise になります。この Promise は、一連の処理を終えたあとに、`strings` の本来の戻り値で解決されます。*url* が [Falsy](https://developer.mozilla.org/ja/docs/Glossary/Falsy) の場合、上記の処理は `strings` の実行元となるドキュメントに対して同期処理で行なわれます。この時、`strings` の戻り値は、通常通り、生成された文字列を列挙する配列になります。
+
 <!--# 0 と 1 の 8 次元座標
 ```javascript
 console.log(...strings("[^:8,',',<[+:0,1,1]>]")); // その1
