@@ -293,7 +293,13 @@ console.log(
 ```
 [($,dom):url, selector[, propertyName = 'innerHTML' ]]
 ```
-　第一引数 *url* に指定した値が示す HTML 文書から、第二引数 *selector* が示す [CSS セレクター](https://developer.mozilla.org/ja/docs/Web/CSS/CSS_Selectors) に一致する要素をすべて取得し、それらの要素の、第三引数 *propertyName* に指定した属性ないしプロパティの値を取得します。*url* が URL を示す値であれば、これらの処理は非同期で行なわれ、`strings` が返す値も Promise になります。この Promise は、一連の処理を終えたあとに、`strings` の本来の戻り値で解決されます。*url* が [Falsy](https://developer.mozilla.org/ja/docs/Glossary/Falsy) の場合、上記の処理は `strings` の実行元となるドキュメントに対して同期処理で行なわれます。この時、`strings` の戻り値は、通常通り、生成された文字列を列挙する配列になります。
+　第一引数 *url* に指定した値が示す HTML 文書から、第二引数 *selector* が示す [CSS セレクター](https://developer.mozilla.org/ja/docs/Web/CSS/CSS_Selectors) に一致する要素をすべて取得し、それらの要素の、第三引数 *propertyName* に指定した属性ないしプロパティの値を取得します。*url* が URL を示す値であれば、これらの処理は非同期通信で行なわれます。URL は、[CORS](https://developer.mozilla.org/ja/docs/Glossary/CORS) が可能でない限り、[同一オリジン](https://developer.mozilla.org/ja/docs/Web/Security/Same-origin_policy)である必要があります。またこの時 `strings` が返す値も Promise になります。この Promise は、一連の処理を終えたあとに、`strings` の本来の戻り値で解決されます。*url* が [Falsy](https://developer.mozilla.org/ja/docs/Glossary/Falsy) の場合、上記の処理は `strings` の実行元となるドキュメントに対して同期処理で行なわれます。この時、`strings` の戻り値は、通常通り、生成された文字列を列挙する Array になります。
+
+　平たく言えば、外部のウェブページから情報を取得するための関数ですが、上記の通り、CORS を無視することはできません。また、*url* に有効な URL を指定した場合の動作はかなり特殊で、取得したドキュメントは、[\<iframe\>](https://developer.mozilla.org/ja/docs/Web/HTML/Element/iframe) を使って、実行元のコンテキストで一度展開されます。展開後、\<iframe\> は情報を取得次第直ちにドキュメントから削除されますが、ウェブページ上に一瞬でもそれが表示されるのは避けられません。この表示は、視覚効果としても好意的な印象を生むことは決してないでしょう。
+
+　また、それよりも重要かつ重大な点として、上記のように、取得した文書はスクリプトの実行元で展開されるため、文書に相対パスが含まれる場合、その相対パスが正しく解決されなくなります。取得した文書が、実行元と同一パス上にあるか、あるいはその相対パスが偶然実行元からも解決できる場合を除けば、取得した文書内からの相対パスによるリソースの取得は失敗に終わるでしょう。この問題は、取得した文書が、外部の JavaScript などを通じて動的に情報を読み込む場合に深刻化します。相対パスによって読み込まれる外部のスクリプトが動作せず、セレクターが示す要素がページ上に現われないと言うケースが考えられます。それでなくても、ウェブページとの対話によって得られる情報は、この関数からは一切取得できません。
+
+　機能だけを見れば、外部の情報のスクレイピングに使うことしか考えられない関数ですが、実際には、同一オリジン内の、外部のリソースに依存しない静的な HTML 文書内の情報の取得と言う、現代のウェブにおけるニッチな状況でしかこの関数が正常に機能することはありません。
 
 <!--# 0 と 1 の 8 次元座標
 ```javascript

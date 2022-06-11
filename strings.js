@@ -2502,13 +2502,17 @@ strings.register([ '^', 'dup' ], [ Duplicator.describe, Duplicator ]);
 
 class Selector {
 	
-	static describe(urls, selector = ':root', propertyName = [ 'innerHTML' ], rxSrc, interval = -1, timeout = 30000) {
+	static describe(urls, selector = ':root', propertyName = [ 'innerHTML' ], rxSrc, replacer, interval = -1, timeout = 30000) {
 		
-		const reflections = [ [ Selector.select, Composer.$, [ ...arguments ] ] ];
+		const	args = [ ...arguments ],
+				{ $, each, reflections } = Composer, reflectors = [ [ Selector.select, $, (args.splice(3, 1), args) ] ];
 		
-		reflections[Composer.reflections] = true;
+		typeof rxSrc === 'string' &&
+			((reflectors[1] = [ String.prototype.replace, $, [ new RegExp(rxSrc), replacer ] ])[each] = true),
 		
-		return reflections;
+		reflectors[reflections] = true;
+		
+		return reflectors;
 		
 	}
 	static {
@@ -2550,7 +2554,7 @@ class Selector {
 	// 第一引数 selector に指定した文字列を、document.querySelectorAll の第一引数にし、
 	// 選択されたすべての要素から、第二引数 propertyName に指定したプロパティの値を取得し、
 	// それを第三引数 values に指定した配列に追加する。
-	static select(urls, selector = ':root', propertyName = [ 'innerHTML' ], rxSrc, interval = -1, timeout = 30000) {
+	static select(urls, selector = ':root', propertyName = [ 'innerHTML' ], replacer, interval = -1, timeout = 30000) {
 		
 		if (urls) {
 			
@@ -2569,8 +2573,8 @@ class Selector {
 				// await を使えばいいかもしれないが、Strings.prototype.get を非同期関数にすることによって生じる影響を検討する気になれない。
 				
 				this[i] = awaits > -1 && i ? 
-					this[i - 1].then((url => () => new Promise(rs => setTimeout(() => prs(url, current, selector, propertyName, rxSrc, timeout, this).catch(error => error).then(v => rs(v)), interval)))(urls[i])) :
-					prs(urls[i], current, selector, propertyName, rxSrc, timeout, values);
+					this[i - 1].then((url => () => new Promise(rs => setTimeout(() => prs(url, current, selector, propertyName, timeout, this).catch(error => error).then(v => rs(v)), interval)))(urls[i])) :
+					prs(urls[i], current, selector, propertyName, timeout, values);
 				
 			}
 			
@@ -2578,12 +2582,12 @@ class Selector {
 			
 		} else {
 			
-			return Selector.getNodesValue(document.querySelectorAll(selector), propertyName, rxSrc, this, Composer.noReturnValue);
+			return Selector.getNodesValue(document.querySelectorAll(selector), propertyName, this, Composer.noReturnValue);
 			
 		}
 		
 	}
-	static promiseRemoteSelector(url, current, selector, propertyName, rxSrc, timeout, values = []) {
+	static promiseRemoteSelector(url, current, selector, propertyName, timeout, values = []) {
 		
 		const ac = new AbortController();
 		
@@ -2596,10 +2600,10 @@ class Selector {
 				timeout && setTimeout(() => (ac.abort(), rj(Error('timeouted'))), timeout);
 			}).
 				then(response => response.text()).catch(error => error).
-					then(v => v instanceof Error ? v : Selector.remote(v, selector, propertyName, rxSrc, values));
+					then(v => v instanceof Error ? v : Selector.remote(v, selector, propertyName, values));
 		
 	}
-	static remote(html, selector, propertyName, rxSrc, values) {
+	static remote(html, selector, propertyName, values) {
 		
 		let resolver;
 		const iframe = document.createElement('iframe'),
@@ -2612,7 +2616,7 @@ class Selector {
 													{
 														signature: '${signature}',
 														values:	(${Selector.getNodesValue.toString().replace(new RegExp(`^${Selector.getNodesValue.name}`), 'function')})
-																		(document.querySelectorAll('${selector}'), ${JSON.stringify(propertyName)}, ${JSON.stringify(rxSrc || null)})
+																		(document.querySelectorAll('${selector}'), ${JSON.stringify(propertyName)})
 													},
 													'${location.origin}'
 												)
@@ -2638,12 +2642,11 @@ class Selector {
 		return promise;
 		
 	}
-	static getNodesValue(nodes = [], propertyName = [ 'innerHTML' ], rxSrc, values = [], returnValue) {
+	static getNodesValue(nodes = [], propertyName = [ 'innerHTML' ], values = [], returnValue) {
 		
 		const	l = nodes.length,
 				requiresAttr = typeof propertyName === 'string',
-				pl = propertyName?.length,
-				rx = rxSrc && new RegExp(rxSrc);
+				pl = propertyName?.length;
 		let i,i0, vl, v;
 		
 		if (!l || !(requiresAttr || pl)) return values;
@@ -2657,9 +2660,9 @@ class Selector {
 		} else if (propertyName[0] === 'style') {
 			
 			while (++i < l) values[++vl] = nodes[i].style.getPropertyValue(propertyName?.[1]) || '';
-		
+			
 		} else {
-		
+			
 			while (++i < l) {
 				
 				i0 = -1, v = nodes[i];
@@ -2667,13 +2670,6 @@ class Selector {
 				values[++vl] = v;
 				
 			}
-			
-		}
-		
-		if (rx) {
-			
-			i = -1, vl = values.length;
-			while (++i < vl) values[i] = rx.exec(values[i])?.[0] || '';
 			
 		}
 		
@@ -2695,6 +2691,8 @@ export class Composer {
 		this.each = Symbol('Composer.each'),
 		this.noReturnValue = Symbol('Composer.noReturnValue'),
 		
+		this.link = Symbol('Composer.link'),
+		
 		this.muted = Symbol('Composer.muted'),
 		
 		this.rejectedPromise = Symbol('Composer.rejectedPromise'),
@@ -2702,6 +2700,7 @@ export class Composer {
 		this.valuesOptions = [
 			this.repetition = Symbol('Composer.repetition'),
 			this.separator = Symbol('Composer.separator'),
+			this.reflections
 		];
 		
 	}
@@ -2809,33 +2808,13 @@ export class Composer {
 	}
 	static *getComposer(parts) {
 		
-		let	i,i0,l0,i1,l1,pi,pl, p, v,
-				composed, mutes, source, resolver, every,backwards, compose, values, method;
+		let i,i0,l0, p, v, composed, mutes, source, every,backwards, handler, values, method;
 		const	l = (Array.isArray(parts) ? parts : (parts = [ parts ])).length,
 				snapshots = [], sources = [],
-				{ reflect, reflections, rejectedPromise, repetition, selectiveCopyProperties, separator, valuesOptions } =
-					this,
-				{ isNaN } = Number,
-				{ max } = Math,
-				{ isArray } = Array,
-				promise = new Promise(rs => resolver = rs),
-				promised = (v, promise, snapshot, source) => {
-					
-					const i = snapshot.indexOf(promise);
-					
-					i === -1 || (
-						v === rejectedPromise ?	(snapshot.splice(i, 1), source && source.splice(i, 1)) :
-														(snapshot[i] = v, source && (source[i] = v))
-					),
-					++pi === pl && (
-							v = snapshot.flat(1), snapshot.length = 0, snapshot.push(...v),
-							source && (v = source.flat(1), source.length = 0, source.push(...v)),
-							resolver()
-						);
-					
-				};
+				{ compose, copySelectedProperties, fulfill, link, reflect, reflections, rejectedPromise, repetition, separator, valuesOptions } = this,
+				{ isNaN } = Number, { max } = Math, { isArray } = Array;
 		
-		i = -1, pi = pl = 0, composed = [];
+		i = -1, composed = [];
 		while (++i < l) {
 			
 			values ||= [];
@@ -2847,10 +2826,10 @@ export class Composer {
 				if (!p) continue;
 				
 				(mutes = 'muted' in p) ?
-					values.push(...Composer.compose([ p.muted ])) :
+					values.push(...compose([ p.muted ])) :
 					(
 						isArray(v = p.v) ? v[reflections] ? reflect(v, values) : values.push(...v) : (values[0] = v),
-						selectiveCopyProperties(values, p, valuesOptions)
+						copySelectedProperties(values, p, valuesOptions)
 					);
 				
 				break;
@@ -2865,20 +2844,29 @@ export class Composer {
 				
 			}
 			
-			selectiveCopyProperties(snapshots[i] = mutes ? values : [ ...(sources[i] = values) ], values, valuesOptions),
+			// 備忘録: snapshots は恐らく読み込みのみを想定した、sources は書き込みも考慮した values のコピー集。
+			// 一方、snapshots の values は、sources の values のシャローコピーで、二つは等価ではない。
 			
-			i0 = -1, l0 = values.length;
-			while (++i0 < l0) (v = values[i0]) instanceof Promise && (
-					++pl,
-					v.then(v => v).catch(error => (console.error(error), rejectedPromise)).
-						then(((promise, ss, src) => v => promised(v, promise, ss, src))(v, snapshots[i], sources[i]))
-				);
+			// mutes が真を示す時の values は、この関数を再帰して作られた確定した値であるため、
+			// 追加処理やそのためのプロパティを確認することなくそのまま使うことができる。
+			snapshots[i] = mutes ? values : copySelectedProperties([ ...(sources[i] = values) ], values, valuesOptions),
+			
+			//i0 = -1, l0 = values.length;
+			//while (++i0 < l0) (v = values[i0]) instanceof Promise && (
+			//		++pl,
+			//		v.then(v => v).catch(error => (console.error(error), rejectedPromise)).
+			//			then(((promise, ss, src) => v => promised(v, promise, ss, src))(v, snapshots[i], sources[i]))
+			//	);
 			
 			values = mutes = null;
 			
 		}
 		
-		pl && (yield promise),
+		(p = fulfill(sources, snapshots)) && (yield p);
+		
+		//pl && (yield promise),
+		
+		// ここ以前も values は値を作成するための一時的な変数にすぎないが、ここ以降はより短いスパンで使い捨てされる。
 		
 		i = -1;
 		while (++i < l) {
@@ -2887,29 +2875,75 @@ export class Composer {
 			
 			typeof (source = sources[i]) === 'number' ? 
 				isArray(values = snapshots[(every = (source = source|0) < 0) ? source * -1 : source]) &&
-					(every || selectiveCopyProperties(source = [ ...values ], values, valuesOptions)) :
+					(every || copySelectedProperties(source = [ ...values ], values, valuesOptions)) :
 				parts[i] && typeof parts[i] === 'object' &&
 					(backwards = parts[i].backwards, every = parts[i].every),
 			
 			i0 = -1, l0 = repetition in source ? isNaN(l0 = +source[repetition]|0) ? 1 : max(l0, 0) : 1,
-			compose = Composer[backwards ? 'everyReverse' : every ? 'every' : 'mix'];
-			while (++i0 < l0) composed = compose(composed, source, i0 ? source?.[separator] ?? '' : '');
+			handler = Composer[backwards ? 'everyReverse' : every ? 'every' : 'mix'];
+			while (++i0 < l0) composed = handler(composed, source, i0 ? source?.[separator] ?? '' : '');
 			
 		}
 		
 		return composed;
 		
 	}
-	static reflect(reflections, values) {
+	static fulfill(sources, snapshots, resolver) {
 		
-		const	{ $, each, noReturnValue, replaceValue } = Composer, { iterator } = Symbol, { apply } = Reflect,
-				l = reflections.length;
+		const l = sources.length;
+		let i,i0,l0, s, hasPromise;
+		
+		i = -1;
+		while (++i < l) {
+			i0 = -1, l0 = (Array.isArray(s = sources[i]) ? s : (s = [ s ])).length;
+			while (++i0 < l0 && !(s[i0] instanceof Promise));
+			if (hasPromise = i0 < l0) break;
+		}
+		
+		return hasPromise && new Promise((rs, rj) => {
+				
+				const promises = [], { isArray } = Array;
+				let i,i0,l0, s,p;
+				
+				i = -1;
+				while (++i < l) {
+					i0 = -1, l0 = (p = promises[i] = Promise.allSettled(isArray(s = sources[i]) ? s : [ s ])).length;
+					while (++i0 < l0) p[i] instanceof Promise || (p[i] = Promise.resolve(p[i]));
+				}
+				
+				Promise.all(promises).then(promised => {
+						
+						const { fulfill, reflect, reflections } = Composer;
+						let i,i0,l0, v,v0, s,ss;
+						
+						i = -1;
+						while (++i < l) {
+							if (!isArray(s = sources[i])) continue;
+							i0 = -1, l0 = (v = promised[i]).length;
+							while (++i0 < l0) (v0 = v[i0]).status === 'rejected' && (v0.splice(i0--, 1), --l0);
+							s.length = (ss = snapshots[i]).length = 0, s.push(...v0.value), ss.push(...s);
+						}
+						
+						i = -1;
+						while (++i < l) isArray(ss = (s = sources[i])[reflections]) && reflect(ss, s);
+						
+						fulfill(sources, snapshots)?.then?.(rs) ?? rs();
+						
+					});
+				
+			});
+			
+	}
+	static reflect(reflectors, values) {
+		
+		const	{ $, each, noReturnValue, reflections, replaceValue } = Composer, { iterator } = Symbol, { apply } = Reflect,
+				l = reflectors.length;
 		let i,i0,l0, v,r, method,itr, args;
 		
 		i = -1;
 		while (++i < l) {
 			
-			if (each in (r = reflections[i])) {
+			if (each in (r = reflectors[i])) {
 				
 				if (r[each]) {
 					
@@ -2925,15 +2959,23 @@ export class Composer {
 					
 				}
 				
-			} else	v = apply(typeof (v = replaceValue(r, $, values))[0] === 'function' ? v[0] : v[1][v[0]], v[1], v[2]),
+			} else	v = apply(typeof (v = replaceValue(r, $, values))[0] === 'function' ? v[0] : (v[1][v[0]]), v[1], v[2]),
 						v === noReturnValue || (values[0] = v);
+			
+			i0 = -1, l0 = values.length;
+			while (++i0 < l0 && !(values[i0] instanceof Promise));
+			
+			if (i0 === l0) continue;
+			
+			++i === l || (values[reflections] = reflectors.slice(i));
+			break;
 			
 		}
 		
 		return values;
 		
 	}
-	static selectiveCopyProperties(target, source, names) {
+	static copySelectedProperties(target, source, names) {
 		
 		const l = names.length;
 		let i,k;
