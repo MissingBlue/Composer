@@ -2500,12 +2500,214 @@ class Duplicator {
 }
 strings.register([ '^', 'dup' ], [ Duplicator.describe, Duplicator ]);
 
+//coco Selector の分離の続き。Selector の機能を分離し、それらを統合して Selector 関数を作る。
+class Agent {
+	
+	static describe(urls, type, timeout, interval, dev) {
+		
+		const	{ $, reflections } = Composer, reflectors = [ [ this.fetch, $, [ ...arguments ] ] ];
+		
+		reflectors[reflections] = true;
+		
+		return reflectors;
+		
+	}
+	
+	static int(v, defaultValue = 0, min = defaultValue) {
+		
+		return Math.max(Number.isNaN(v = +v|0) ? defaultValue : v, min);
+		
+	}
+	static fetch(urls, type, timeout, interval, dev) {
+		
+		if (urls === undefined || urls === null) return '';
+		
+		Array.isArray(urls) || (urls = [ urls ]);
+		
+		const	l = urls.length,
+				current = location.origin + location.pathname,
+				{ request, int, standby } = Agent,
+				awaits = (interval = int(interval, 0, -1)) > -1;
+		let i;
+		
+		i = -1;
+		while (++i < l) this[i] = awaits && i ?	this[i - 1].then(standby(urls[i], current, type, timeout, interval, dev)) :
+																request(urls[i], current, type, timeout, dev);
+		
+		return Composer.noReturnValue;
+		
+	}
+	static standby(url, current, type, timeout, interval, dev) {
+		
+		return () =>	new Promise(
+								rs => setTimeout(
+											() => Agent.request(url, current, type, timeout, dev).catch(error => error).then(v => rs(v)),
+											Agent.int(interval, 0)
+										)
+							);
+		
+	}
+	static request(url, current, type = 'text', timeoutDuration = 30000, dev) {
+		
+		const { int, timeout, typeRx, types, } = Agent;
+		
+		if (!((type = typeof type === 'string' ? type.replace(typeRx, '$&').toLowerCase() : 'text') in types)) return '';
+		
+		const urlObject = new URL(url, current);
+		
+		type = Agent.types[type],
+		timeoutDuration = int(timeoutDuration, 30000, -1),
+		
+		dev && console.info('[Strings]', 'LOAD', url, urlObject);
+		
+		return new Promise((rs, rj) => {
+				
+				const ac = new AbortController();
+				
+				fetch(urlObject+'', { signal: ac.signal }).then(response => rs(response)).catch(error => rj(error)),
+				
+				timeoutDuration > -1 && setTimeout(timeout, timeoutDuration, ac, rj);
+				
+			}).then(response => response[type]()).catch(error => error);
+		
+	}
+	static timeout(abortController, reject) {
+		
+		abortController.abort(),
+		reject(new Error('timeouted'));
+		
+	}
+	
+	static {
+		
+		this.types = {
+			arraybuffer: 'arrayBuffer',
+			blob: 'blob',
+			clone: 'clone',
+			error: 'error',
+			formData: 'formData',
+			json: 'json',
+			redirect: 'redirect',
+			text: 'text'
+		},
+		
+		this.typeRx = new RegExp(`^${Object.keys(this.types).join('|')}$`, 'i');
+		
+	}
+	
+}
+strings.register([ 'agent', 'fetch' ], [ Agent.describe, Agent ]);
+
 class Selector {
 	
 	static describe(urls, selector = ':root', propertyName = [ 'innerHTML' ], rxSrc, replacer, interval = -1, timeout = 30000) {
 		
 		const	args = [ ...arguments ],
-				{ $, each, reflections } = Composer, reflectors = [ [ Selector.select, $, (args.splice(3, 1), args) ] ];
+				{ $, each, reflections, spreads } = Composer,
+				reflectors = [
+					[ Agent.fetch, $, [ urls, 'text', timeout, interval ] ],
+					[ this.reflect, $, [ selector, propertyName ] ]
+				];
+		
+		reflectors[1][each] = true,
+		reflectors[1][spreads] = true,
+		
+		typeof rxSrc === 'string' &&
+			((reflectors[2] = [ String.prototype.replace, $, [ new RegExp(rxSrc), replacer ] ])[each] = true),
+		
+		reflectors[reflections] = true;
+		
+		return reflectors;
+		
+	}
+	
+	static reflect(selector, propertyName) {
+		
+		return typeof this === 'string' ?	Selector.load(this, selector, propertyName) :
+														Selector.fetch(document.querySelectorAll(selector), propertyName);
+		
+	}
+	
+	static load(srcdoc, selector, propertyName) {
+		
+		return new Promise(rs => {
+				
+				const	iframe = document.createElement('iframe'),
+						// https://developer.mozilla.org/ja/docs/Web/API/crypto_property
+						signature = crypto.getRandomValues(new Uint32Array(1)).join(),
+						received = message => message.data?.signature === signature && (
+									iframe.contentWindow.removeEventListener('message', received),
+									iframe.remove(),
+									rs([ ...message.data.values ])
+								),
+						loaded = event => {
+								const { contentWindow } = iframe;
+								contentWindow.addEventListener('message', received),
+								contentWindow.postMessage(
+									{
+										signature,
+										values: Selector.fetch(contentWindow.document.querySelectorAll(selector), propertyName)
+									},
+									location.origin
+								)
+							};
+				
+				iframe.srcdoc = srcdoc,
+				iframe.addEventListener('load', loaded, { once: true }),
+				document.body.appendChild(iframe);
+				
+			});
+		
+	}
+	static fetch(nodes = [], propertyName = [ 'innerHTML' ], values = [], returnValue) {
+		
+		const	l = nodes.length,
+				requiresAttr = typeof propertyName === 'string',
+				pl = propertyName?.length;
+		let i,i0, vl, v;
+		
+		if (!l || !(requiresAttr || pl)) return values;
+		
+		i = -1, vl = values.length - 1;
+		
+		if (requiresAttr) {
+			
+			while (++i < l) values[++vl] = nodes[i].getAttribute(propertyName) || '';
+			
+		} else if (propertyName[0] === 'style') {
+			
+			while (++i < l) values[++vl] = nodes[i].style.getPropertyValue(propertyName?.[1]) || '';
+			
+		} else {
+			
+			while (++i < l) {
+				
+				i0 = -1, v = nodes[i];
+				while (++i0 < pl && (v = v[propertyName[i0]]) && typeof v === 'object');
+				values[++vl] = v;
+				
+			}
+			
+		}
+		
+		return returnValue || values;
+		
+	}
+	static {
+		
+		this.describe[StringsDescriptor.variadic] = true;
+		
+	}
+	
+}
+strings.register([ '$', 'dom' ], [ Selector.describe, Selector ]);
+
+class Selector1 {
+	
+	static describe(urls, selector = ':root', propertyName = [ 'innerHTML' ], rxSrc, replacer, interval = -1, timeout = 30000) {
+		
+		const	args = [ ...arguments ],
+				{ $, each, reflections } = Composer, reflectors = [ [ Selector1.select, $, (args.splice(3, 2), args) ] ];
 		
 		typeof rxSrc === 'string' &&
 			((reflectors[1] = [ String.prototype.replace, $, [ new RegExp(rxSrc), replacer ] ])[each] = true),
@@ -2554,7 +2756,7 @@ class Selector {
 	// 第一引数 selector に指定した文字列を、document.querySelectorAll の第一引数にし、
 	// 選択されたすべての要素から、第二引数 propertyName に指定したプロパティの値を取得し、
 	// それを第三引数 values に指定した配列に追加する。
-	static select(urls, selector = ':root', propertyName = [ 'innerHTML' ], replacer, interval = -1, timeout = 30000) {
+	static select(urls, selector = ':root', propertyName = [ 'innerHTML' ], interval = -1, timeout = 30000) {
 		
 		if (urls) {
 			
@@ -2562,7 +2764,8 @@ class Selector {
 			
 			const	URLs = [], l = urls.length, current = location.origin + location.pathname,
 					awaits = (interval = interval|0) > -1,
-					prs = Selector.promiseRemoteSelector,
+					prs = Selector1.promiseRemoteSelector,
+					promises = [],
 					values = [];
 			let i;
 			
@@ -2572,17 +2775,30 @@ class Selector {
 				// 引数 intervals が有効で、かつ urls の数が多い時、恐らくすさまじい数の Promise のネストが発生するだろう。
 				// await を使えばいいかもしれないが、Strings.prototype.get を非同期関数にすることによって生じる影響を検討する気になれない。
 				
-				this[i] = awaits > -1 && i ? 
-					this[i - 1].then((url => () => new Promise(rs => setTimeout(() => prs(url, current, selector, propertyName, timeout, this).catch(error => error).then(v => rs(v)), interval)))(urls[i])) :
+				promises[i] = awaits > -1 && i ? 
+					promises[i - 1].then((url => () => new Promise(rs => setTimeout(() => prs(url, current, selector, propertyName, timeout, values).catch(error => error).then(v => rs(v)), interval)))(urls[i])) :
 					prs(urls[i], current, selector, propertyName, timeout, values);
 				
 			}
 			
-			return Composer.noReturnValue;
+			return new Promise(rs => {
+					
+					Promise.allSettled(promises).then(promised => {
+						
+						let i,l,i0;
+						
+						i = i0 = -1, l = promised.length, this.length = 0;
+						while (++i < l) promised[i].status === 'fulfilled' && this.push(...promised[i].value);
+						
+						rs(Composer.nope);
+						
+					});
+				
+			});
 			
 		} else {
 			
-			return Selector.getNodesValue(document.querySelectorAll(selector), propertyName, this, Composer.noReturnValue);
+			return Selector1.getNodesValue(document.querySelectorAll(selector), propertyName, this, Composer.noReturnValue);
 			
 		}
 		
@@ -2600,7 +2816,7 @@ class Selector {
 				timeout && setTimeout(() => (ac.abort(), rj(Error('timeouted'))), timeout);
 			}).
 				then(response => response.text()).catch(error => error).
-					then(v => v instanceof Error ? v : Selector.remote(v, selector, propertyName, values));
+					then(v => v instanceof Error ? v : Selector1.remote(v, selector, propertyName, values));
 		
 	}
 	static remote(html, selector, propertyName, values) {
@@ -2615,7 +2831,7 @@ class Selector {
 												postMessage(
 													{
 														signature: '${signature}',
-														values:	(${Selector.getNodesValue.toString().replace(new RegExp(`^${Selector.getNodesValue.name}`), 'function')})
+														values:	(${Selector1.getNodesValue.toString().replace(new RegExp(`^${Selector1.getNodesValue.name}`), 'function')})
 																		(document.querySelectorAll('${selector}'), ${JSON.stringify(propertyName)})
 													},
 													'${location.origin}'
@@ -2678,18 +2894,36 @@ class Selector {
 	}
 	
 }
-strings.register([ '$', 'dom' ], [ Selector.describe, Selector ]);
+strings.register([ '$_old', 'dom_old' ], [ Selector1.describe, Selector1 ]);
 
 export class Composer {
 	
 	static {
 		
 		this.$ = Symbol('Composer.$'),
-		this.exec = Symbol('Composer.exec'),
-		this.reflections = Symbol('Composer.reflections'),
-		this.reflection = Symbol('Composer.reflection'),
 		this.each = Symbol('Composer.each'),
+		this.exec = Symbol('Composer.exec'),
+		this.reflection = Symbol('Composer.reflection'),
+		this.reflections = Symbol('Composer.reflections'),
+		this.nope = Symbol('Composer.nope'),
 		this.noReturnValue = Symbol('Composer.noReturnValue'),
+		
+		// 関数の戻り値の要素がイテレーター関数を持っていた場合、スプレッド記法によるその要素の展開結果を、戻り値のその要素の位置に置き換える。
+		// 説明は難解だが、処理的には Array.prototype.flat と似ていて、
+		// 例えば関数 r の戻り値が [ [ 0, 1, 2 ], [ 3, 4, 5 ] ] で、r[spreads] = true だった場合、
+		// 戻り値は、[ 0, 1, 2, 3, 4, 5 ] になる。
+		// より高度な使い方として、また本来の想定ケースとして、
+		// Promise を返す関数で、その Promise が配列で解決される場合に、関数に [spreads] = true を設定すると、
+		// その関数の戻り値はその関数指定内で自己完結的に実際に使用可能な戻り値を生成できる。
+		// この説明も非常に直感的ではないが、例えば戻り値が [ Promise, Promise, ... ] で、
+		// この Promise が解決された時に [ [ ... ], [ ... ], ... ] となった場合、[spreads] = true であれば、
+		// この関数後に、[ Array.prototype.flat, ... ] 的な処理を加えなくても、戻り値は単独で [ ... ] となる。
+		// 実際問題、仮に [ Array.prototype.flat, ... ] を加えても、戻り値は [ [ ... ], [ ... ], ... ] のままである。
+		// なぜなら Array.prototype.flat の戻り値は配列であるため、仮にその実行スコープを戻り値そのものにしても、
+		// ネストを含む配列を一元化された配列が、戻り値の配列内の要素のひとつとして列挙されるためである。
+		// こうした処理は、一見するとフラグで指定しなくても自動で行なうようにすればいいかもしれないが、
+		// 将来的に、配列を含む戻り値を許容する可能性を想定している。
+		this.spreads = Symbol('Composer.spreads'),
 		
 		this.link = Symbol('Composer.link'),
 		
@@ -2762,6 +2996,27 @@ export class Composer {
 		return promises ? Promise.resolve(composed) : composed;
 		
 	}
+	
+	//static compose(parts, promises) {
+	//	
+	//	const v = Composer.resolveComposition(Composer.getComposer(parts));
+	//	
+	//	return v instanceof Promise || !promises ? v : Promise.resolve(v);
+	//	
+	//}
+	//static resolveComposition(generator, resolver) {
+	//	
+	//	const { done, value } = generator.next();
+	//	
+	//	return done ?
+	//				resolver?.(value) ?? value :
+	//				value instanceof Promise ?
+	//					resolver ?	value.then(v => Composer.resolveComposition(generator, resolver)) :
+	//									new Promise(rs => value.then(() => Composer.resolveComposition(generator, rs))) :
+	//					resolver?.(generator.next().value) ?? value;
+	//	
+	//}
+	
 	// 第一引数 parts に指定された配列に列挙した記述子に基づいて任意の文字列を任意の数生成し、
 	// それを配列に列挙して戻り値にする。
 	// 各記述子の詳細については、対応するメソッドの説明を参照。
@@ -2844,29 +3099,13 @@ export class Composer {
 				
 			}
 			
-			// 備忘録: snapshots は恐らく読み込みのみを想定した、sources は書き込みも考慮した values のコピー集。
-			// 一方、snapshots の values は、sources の values のシャローコピーで、二つは等価ではない。
-			
-			// mutes が真を示す時の values は、この関数を再帰して作られた確定した値であるため、
-			// 追加処理やそのためのプロパティを確認することなくそのまま使うことができる。
 			snapshots[i] = mutes ? values : copySelectedProperties([ ...(sources[i] = values) ], values, valuesOptions),
-			
-			//i0 = -1, l0 = values.length;
-			//while (++i0 < l0) (v = values[i0]) instanceof Promise && (
-			//		++pl,
-			//		v.then(v => v).catch(error => (console.error(error), rejectedPromise)).
-			//			then(((promise, ss, src) => v => promised(v, promise, ss, src))(v, snapshots[i], sources[i]))
-			//	);
 			
 			values = mutes = null;
 			
 		}
 		
-		(p = fulfill(sources, snapshots)) && (yield p);
-		
-		//pl && (yield promise),
-		
-		// ここ以前も values は値を作成するための一時的な変数にすぎないが、ここ以降はより短いスパンで使い捨てされる。
+		(p = fulfill(sources, snapshots)) && (yield p),
 		
 		i = -1;
 		while (++i < l) {
@@ -2888,7 +3127,7 @@ export class Composer {
 		return composed;
 		
 	}
-	static fulfill(sources, snapshots, resolver) {
+	static fulfill(sources, snapshots) {
 		
 		const l = sources.length;
 		let i,i0,l0, s, hasPromise;
@@ -2913,15 +3152,36 @@ export class Composer {
 				
 				Promise.all(promises).then(promised => {
 						
-						const { fulfill, reflect, reflections } = Composer;
-						let i,i0,l0, v,v0, s,ss;
+						const { insertValue, fulfill, nope, reflect, reflections, spreads } = Composer;
+						let i,i0,l0,i1, v,v0, s,ss, spreadsValue;
 						
 						i = -1;
 						while (++i < l) {
+							
 							if (!isArray(s = sources[i])) continue;
+							
 							i0 = -1, l0 = (v = promised[i]).length;
-							while (++i0 < l0) (v0 = v[i0]).status === 'rejected' && (v0.splice(i0--, 1), --l0);
-							s.length = (ss = snapshots[i]).length = 0, s.push(...v0.value), ss.push(...s);
+							while (++i0 < l0) (v0 = v[i0]).status === 'rejected' ? (v.splice(i0--, 1), --l0) :
+								(v0.value === nope ? (i0 = l0) : (v[i0] = v0.value));
+							
+							// promised に列挙された要素が持つプロパティ value に、Composer.nope を示す値がある場合、
+							// その promised 全体の要素の value は、sources に反映されない。
+							// この nope は、promised が解決される過程で、sources の参照を用いて、
+							// 既に同値に値を設定済みである場合に、そのことを明示するために用いる。
+							// この仕様は若干難解なため、より簡素化できるならそれに置き換えるべき。
+							
+							ss = snapshots[i];
+							
+							if (i0 <= l0) {
+								
+								i0 = -1, l0 = v.length, spreadsValue = s[spreads], s.length = ss.length = 0;
+								while (++i0 < l0) (i1 = insertValue(v[i0], v, i0, spreadsValue)) && (i0 += i1, l0 += i1);
+								s.push(...v);
+								
+							}
+							
+							ss.push(...s);
+							
 						}
 						
 						i = -1;
@@ -2936,43 +3196,58 @@ export class Composer {
 	}
 	static reflect(reflectors, values) {
 		
-		const	{ $, each, noReturnValue, reflections, replaceValue } = Composer, { iterator } = Symbol, { apply } = Reflect,
+		const	{ $, each, noReturnValue, insertValue, reflections, replaceValue, spreads } = Composer,
+				{ iterator } = Symbol,
+				{ apply } = Reflect,
 				l = reflectors.length;
-		let i,i0,l0, v,r, method,itr, args;
+		let i,i0,l0, v,r, method,itr, args, spreadsValue;
 		
 		i = -1;
 		while (++i < l) {
 			
-			if (each in (r = reflectors[i])) {
+			spreadsValue = (r = reflectors[i])[spreads];
+			
+			if (each in r) {
 				
 				if (r[each]) {
 					
 					i0 = -1, l0 = values.length;
 					while (++i0 < l0)
 						v = replaceValue(r, $, values[i0]),
-						values[i0] = apply(typeof v[0] === 'function' ? v[0] : v[1][v[0]], v[1], v[2]);
+						(v = insertValue(
+												apply(typeof v[0] === 'function' ? v[0] : v[1][v[0]], v[1], v[2]),
+												values,
+												i0,
+												spreadsValue
+											)) && (i0 += v, l0 += v);
 					
 				} else if (typeof r?.[1][iterator] === 'function') {
 					
 					i0 = -1, method = r[0], itr = r[1][iterator](), args = r[2];
-					for (v of itr) values[++i0] = apply(typeof method === 'function' ? method : v[method], v, args);
+					for (v of itr) i0 += insertValue(apply(typeof method === 'function' ? method : v[method], v, args), values, ++i0, spreadsValue);
 					
 				}
 				
-			} else	v = apply(typeof (v = replaceValue(r, $, values))[0] === 'function' ? v[0] : (v[1][v[0]]), v[1], v[2]),
-						v === noReturnValue || (values[0] = v);
+			} else	v = apply(typeof (v = replaceValue(r, $, values))[0] === 'function' ? v[0] : v[1][v[0]], v[1], v[2]),
+						v === noReturnValue || insertValue(v, values, 0, spreadsValue);
 			
 			i0 = -1, l0 = values.length;
 			while (++i0 < l0 && !(values[i0] instanceof Promise));
 			
 			if (i0 === l0) continue;
 			
-			++i === l || (values[reflections] = reflectors.slice(i));
+			++i === l || (values[spreads] = spreadsValue, values[reflections] = reflectors.slice(i));
 			break;
 			
 		}
 		
 		return values;
+		
+	}
+	static insertValue(v, values, index = values.length, spreads) {
+		
+		return spreads && typeof v[Symbol.iterator] === 'function' ?
+			values.splice(index, 1, ...v).length : (values[index] = v, 0);
 		
 	}
 	static copySelectedProperties(target, source, names) {
