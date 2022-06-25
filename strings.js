@@ -2500,6 +2500,7 @@ class Duplicator {
 }
 strings.register([ '^', 'dup' ], [ Duplicator.describe, Duplicator ]);
 
+//coco 不特定多数の url への対応
 class Agent {
 	
 	static describe(urls, type, timeout, interval, dev) {
@@ -2597,42 +2598,35 @@ class Agent {
 }
 strings.register([ 'agent', 'fetch' ], [ Agent.describe, Agent ]);
 
-class FetchText {
-	
-	static describe(urls, rxSrc, replacer, interval = -1, timeout = 30000) {
-		
-		const	args = [ ...arguments ],
-				{ $, each, reflections } = Composer,
-				reflectors = [ [ Agent.fetch, $, [ urls, 'text', timeout, interval ] ] ];
-		
-		typeof rxSrc === 'string' &&
-			((reflectors[1] = [ String.prototype.replace, $, [ new RegExp(rxSrc), replacer ] ])[each] = true),
-		
-		reflectors[reflections] = true;
-		
-		return reflectors;
-		
-	}
-	
-}
-strings.register([ 'ft', 'fetchtext' ], [ FetchText.describe, FetchText ]);
-
 class Selector {
 	
-	static describe(urls, selector = ':root', propertyName = [ 'innerHTML' ], rxSrc, replacer, interval = -1, timeout = 30000) {
+	static decide(type) {
+		
+		switch (type) {
+			case 'selector':
+			return this.describe(...arguments);
+			default:
+			return this.describe(type, arguments[1], null, null, ...[ ...arguments ].slice(2));
+		}
+		
+	}
+	static describe(type, urls, selector = ':root', propertyName = [ 'innerHTML' ], rxSrc, replacer, interval = -1, timeout = 30000) {
 		
 		const	args = [ ...arguments ],
 				{ $, each, reflections, spreads } = Composer,
-				reflectors = [
-					[ Agent.fetch, $, [ urls, 'text', timeout, interval ] ],
-					[ this.reflect, $, [ selector, propertyName ] ]
-				];
+				reflectors = [ [ Agent.fetch, $, [ urls, 'text', timeout, interval ] ] ];
+		let i;
 		
-		reflectors[1][each] = true,
-		reflectors[1][spreads] = true,
+		i = 0,
+		type === 'selector' && (
+				reflectors[++i] = [ this.reflect, $, [ selector, propertyName ] ],
+				reflectors[i][each] = true,
+				reflectors[i][spreads] = true
+			),
+		
 		
 		typeof rxSrc === 'string' &&
-			((reflectors[2] = [ String.prototype.replace, $, [ new RegExp(rxSrc), replacer ] ])[each] = true),
+			((reflectors[++i] = [ String.prototype.replace, $, [ new RegExp(rxSrc), replacer ] ])[each] = true),
 		
 		reflectors[reflections] = true;
 		
@@ -2714,12 +2708,13 @@ class Selector {
 	}
 	static {
 		
-		this.describe[StringsDescriptor.variadic] = true;
+		this.decide[StringsDescriptor.variadic] = true;
 		
 	}
 	
 }
-strings.register([ '$', 'dom' ], [ Selector.describe, Selector ]);
+strings.register([ 'ft', 'fetchtext' ], [ Selector.decide, Selector, [ 'text' ] ]),
+strings.register([ '$', 'dom' ], [ Selector.decide, Selector, [ 'selector' ] ]);
 
 export class Composer {
 	
