@@ -2500,7 +2500,6 @@ class Duplicator {
 }
 strings.register([ '^', 'dup' ], [ Duplicator.describe, Duplicator ]);
 
-//coco Selector の分離の続き。Selector の機能を分離し、それらを統合して Selector 関数を作る。
 class Agent {
 	
 	static describe(urls, type, timeout, interval, dev) {
@@ -2597,6 +2596,26 @@ class Agent {
 	
 }
 strings.register([ 'agent', 'fetch' ], [ Agent.describe, Agent ]);
+
+class FetchText {
+	
+	static describe(urls, rxSrc, replacer, interval = -1, timeout = 30000) {
+		
+		const	args = [ ...arguments ],
+				{ $, each, reflections } = Composer,
+				reflectors = [ [ Agent.fetch, $, [ urls, 'text', timeout, interval ] ] ];
+		
+		typeof rxSrc === 'string' &&
+			((reflectors[1] = [ String.prototype.replace, $, [ new RegExp(rxSrc), replacer ] ])[each] = true),
+		
+		reflectors[reflections] = true;
+		
+		return reflectors;
+		
+	}
+	
+}
+strings.register([ 'ft', 'fetchtext' ], [ FetchText.describe, FetchText ]);
 
 class Selector {
 	
@@ -2701,200 +2720,6 @@ class Selector {
 	
 }
 strings.register([ '$', 'dom' ], [ Selector.describe, Selector ]);
-
-class Selector1 {
-	
-	static describe(urls, selector = ':root', propertyName = [ 'innerHTML' ], rxSrc, replacer, interval = -1, timeout = 30000) {
-		
-		const	args = [ ...arguments ],
-				{ $, each, reflections } = Composer, reflectors = [ [ Selector1.select, $, (args.splice(3, 2), args) ] ];
-		
-		typeof rxSrc === 'string' &&
-			((reflectors[1] = [ String.prototype.replace, $, [ new RegExp(rxSrc), replacer ] ])[each] = true),
-		
-		reflectors[reflections] = true;
-		
-		return reflectors;
-		
-	}
-	static {
-		
-		this.describe[StringsDescriptor.variadic] = true;
-		
-	}
-	
-	// 第一引数 urls に指定された配列の要素が示すべき URL にアクセスし、
-	// 取得した HTML を(HTML であるべき) <iframe> に読み込み、
-	// 展開されたドキュメントの第二引数 selector に一致するすべての要素から、第三引数 propertyName に指定された属性値ないしプロパティを取得する。
-	// 取得した値は第六引数 values に指定された配列に列挙される Promise を通じて渡される。
-	// urls が偽を示す時は、このオブジェクトが属するドキュメントに対して上記の処理を同期処理で行なう。
-	// つまり、values の要素には Promise ではなく取得した値がそのまま設定される。
-	// 第四引数 interval に自然数が設定された時、非同期で行なわれる値の取得処理は、
-	// urls に指定された URL 順に、ひとつ処理が完了する毎に intervals で指定したミリ秒待機後、次の要素へ移行するのを urls の末尾まで繰り返す。
-	// 一方 values には戻り値に渡された時点ですべての要素に Promise が設定されている。
-	// 正しく動作すればこの values の末端の Promise の解決がすべての要素の解決を意味することになる。
-	// intervals に自然数以外の値（既定値）を指定すると、すべての URL 先に同時平行してアクセスする。
-	// 第五引数 timeout に自然数が設定されると、それをミリ秒として、timeout までに HTML の取得ができなければ
-	// 強制的にその通信を中断し、該当の Promise を拒否する。timeout は、既定では 30 秒に設定される。
-	// URL 先のドキュメントを、ブラウザーからウェブページへアクセスするのとまったく同じに、実際に完全にブラウザー上で展開するため、
-	// URL の数が多ければ多いほどパフォーマンスの問題が生じる。
-	// また intervals に指定する値が小さければ、アクセス先に経済的なものも含む深刻な損害を与えかねない点に注意しなければならない。
-	// こうした問題を踏まえた上で実行し、実際にアクセスに成功しても、期待した結果は得られないかもしれない。
-	// 特に動的にリソースを読み込むページ上の情報はほとんど正確な結果は期待できない。
-	// このメソッドは、まず対象の URL が示す HTML を文字列として取得したあと、
-	// このスクリプトを読み込んだページ上に追加した iframe の属性 srcdoc にそれを指定する。
-	// つまり HTML の絶対パスは、このスクリプトの実行パスになり、HTML が異なる階層に存在していた場合、HTML 内のすべての相対パスに不整合が生じるのである。
-	// このメソッドが期待する結果を返すのは、概ね静的なページに対してのみである。
-	// これは W3C の定める同一オリジンポリシーによる制限で、サーバーと連携するか、拡張機能上でなければ回避することはできない。
-	//
-	// 入れ子状の Promise が複雑に接続しており、匿名関数を通じたコールバック関数の作成の多用と、
-	// 特定の箇所で Promise を生成元外で解決している点を踏まえなければ、履行の追跡は難しいと思われる。
-	// 通信処理とは関係のない、戻り値の作成を、他の処理と切り分けて捉えることも重要。
-	// さらに、これらの一連の遅延処理の流れは、この関数群の呼び出し元 Composer.getComposer をまたぎ、一方だけの理解では把握に至れない。
-	//
-	// 以下は旧解説。
-	// 第一引数 selector に指定した文字列を、document.querySelectorAll の第一引数にし、
-	// 選択されたすべての要素から、第二引数 propertyName に指定したプロパティの値を取得し、
-	// それを第三引数 values に指定した配列に追加する。
-	static select(urls, selector = ':root', propertyName = [ 'innerHTML' ], interval = -1, timeout = 30000) {
-		
-		if (urls) {
-			
-			Array.isArray(urls) || (urls = [ urls ]);
-			
-			const	URLs = [], l = urls.length, current = location.origin + location.pathname,
-					awaits = (interval = interval|0) > -1,
-					prs = Selector1.promiseRemoteSelector,
-					promises = [],
-					values = [];
-			let i;
-			
-			i = -1;
-			while (++i < l) {
-				
-				// 引数 intervals が有効で、かつ urls の数が多い時、恐らくすさまじい数の Promise のネストが発生するだろう。
-				// await を使えばいいかもしれないが、Strings.prototype.get を非同期関数にすることによって生じる影響を検討する気になれない。
-				
-				promises[i] = awaits > -1 && i ? 
-					promises[i - 1].then((url => () => new Promise(rs => setTimeout(() => prs(url, current, selector, propertyName, timeout, values).catch(error => error).then(v => rs(v)), interval)))(urls[i])) :
-					prs(urls[i], current, selector, propertyName, timeout, values);
-				
-			}
-			
-			return new Promise(rs => {
-					
-					Promise.allSettled(promises).then(promised => {
-						
-						let i,l,i0;
-						
-						i = i0 = -1, l = promised.length, this.length = 0;
-						while (++i < l) promised[i].status === 'fulfilled' && this.push(...promised[i].value);
-						
-						rs(Composer.nope);
-						
-					});
-				
-			});
-			
-		} else {
-			
-			return Selector1.getNodesValue(document.querySelectorAll(selector), propertyName, this, Composer.noReturnValue);
-			
-		}
-		
-	}
-	static promiseRemoteSelector(url, current, selector, propertyName, timeout, values = []) {
-		
-		const ac = new AbortController();
-		
-		console.info('[Strings]', 'LOAD', url);
-		
-		return new Promise((rs, rj) => {
-				const ac = new AbortController();
-				fetch(new URL(url, current)+'', { signal: ac.signal }).
-					then(response => rs(response)).catch(error => rj(error)),
-				timeout && setTimeout(() => (ac.abort(), rj(Error('timeouted'))), timeout);
-			}).
-				then(response => response.text()).catch(error => error).
-					then(v => v instanceof Error ? v : Selector1.remote(v, selector, propertyName, values));
-		
-	}
-	static remote(html, selector, propertyName, values) {
-		
-		let resolver;
-		const iframe = document.createElement('iframe'),
-				// https://developer.mozilla.org/ja/docs/Web/API/crypto_property
-				signature = crypto.getRandomValues(new Uint32Array(1)).join(),
-				messenger = `<script>
-						const	loaded = event => {
-												removeEventListener('message', loaded),
-												postMessage(
-													{
-														signature: '${signature}',
-														values:	(${Selector1.getNodesValue.toString().replace(new RegExp(`^${Selector1.getNodesValue.name}`), 'function')})
-																		(document.querySelectorAll('${selector}'), ${JSON.stringify(propertyName)})
-													},
-													'${location.origin}'
-												)
-											};
-						addEventListener('DOMContentLoaded', loaded);
-					</script>`,
-				promise = new Promise (rs => resolver = rs),
-				received = message => message.data?.signature === signature && (
-						iframe.contentWindow.removeEventListener('message', received),
-						iframe.remove(),
-						values.push(...message.data.values),
-						resolver(values)
-					),
-				loaded = event => (
-						iframe.removeEventListener(event.type, loaded),
-						iframe.contentWindow.addEventListener('message', received)
-					);
-		
-		iframe.addEventListener('load', loaded),
-		iframe.srcdoc = html + messenger,
-		document.body.appendChild(iframe);
-		
-		return promise;
-		
-	}
-	static getNodesValue(nodes = [], propertyName = [ 'innerHTML' ], values = [], returnValue) {
-		
-		const	l = nodes.length,
-				requiresAttr = typeof propertyName === 'string',
-				pl = propertyName?.length;
-		let i,i0, vl, v;
-		
-		if (!l || !(requiresAttr || pl)) return values;
-		
-		i = -1, vl = values.length - 1;
-		
-		if (requiresAttr) {
-			
-			while (++i < l) values[++vl] = nodes[i].getAttribute(propertyName) || '';
-			
-		} else if (propertyName[0] === 'style') {
-			
-			while (++i < l) values[++vl] = nodes[i].style.getPropertyValue(propertyName?.[1]) || '';
-			
-		} else {
-			
-			while (++i < l) {
-				
-				i0 = -1, v = nodes[i];
-				while (++i0 < pl && (v = v[propertyName[i0]]) && typeof v === 'object');
-				values[++vl] = v;
-				
-			}
-			
-		}
-		
-		return returnValue || values;
-		
-	}
-	
-}
-strings.register([ '$_old', 'dom_old' ], [ Selector1.describe, Selector1 ]);
 
 export class Composer {
 	
