@@ -48,7 +48,7 @@ export class Indexer {
 			const	{ indexed } = Indexer, l = matched.length, v = [], handles = typeof handler === 'function';
 			let i,i0, m;
 			
-			i = i0 = -1, ((cache[input] ||= matched)[indexed] ||= new Map()).set(handler, v);
+			i = i0 = -1, m = (cache[input] ||= matched)[indexed] ||= new Map(), handler && m.set(handler, v);
 			while (++i < l)	(m = matched[i]).captor ||= this,
 									m.lastIndex = m.index + m[0].length,
 									(!handles || handler(m, i,l)) && (v[++i0] = m);
@@ -124,7 +124,10 @@ export class Unit extends Indexer {
 	
 	static {
 		
-		this.flags = Symbol('Unit.flags');
+		this.flags = Symbol('Unit.flags'),
+		
+		this.defaultFlags = (this.defaultFlag = 'g').split('');
+		//this.defaultFlags = (this.defaultFlag = 'dg').split('');
 		
 	}
 	
@@ -185,18 +188,26 @@ export class Unit extends Indexer {
 			(this.lastRx = new RegExp(this.last = unit, this.lastFlags = flags));
 		
 	}
-	set flags(flags = 'g') {
+	set flags(v = Unit.defaultFlag) {
 		
-		const lastFlags = this[Unit.flags];
-		let f;
+		const { defaultFlags, flags } = Unit, lastFlags = this[flags];
 		
-		typeof flags === 'string' && (this[Unit.flags] = f = flags.indexOf('g') === -1 ? (flags += 'g') : flags),
-		lastFlags === f || this.clearCache();
+		if (typeof v === 'string') {
+			
+			const l = defaultFlags.length;
+			let i, df;
+			
+			i = -1, v;
+			while (++i < l) v.indexOf(df = defaultFlags[i]) === -1 && (v += df);
+			
+		} else v = defaultFlag;
+		
+		lastFlags === (this[flags] = v) || this.clearCache();
 		
 	}
 	get flags() {
 		
-		return this[Unit.flags] ||= 'g';
+		return this[Unit.flags] ||= Unit.defaultFlag;
 		
 	}
 	
@@ -301,10 +312,10 @@ export class Sequence extends Unit {
 		let i,m,lm, replaced;
 		
 		i = -1, replaced = '';
-		while (++i < l) replaced +=	str.substring(lm ? lm.index + lm[0].length : 0, (m = matched[i]).index) +
+		while (++i < l) replaced +=	str.substring(lm ? lm.lastIndex : 0, (m = matched[i]).index) +
 												('units' in (lm = m) ? m.units.at(-1)[0] : replacer);
 		
-		return replaced += lm ? str.substring(lm.index + lm[0].length) : str;
+		return replaced += lm ? str.substring(lm.lastIndex) : str;
 		
 	}
 	
@@ -477,7 +488,7 @@ export class Chr extends Unit {
 		
 	}
 	
-	equals(chr) {
+	isSameAs(chr) {
 		
 		if (!(chr instanceof Chr)) return false;
 		
@@ -504,6 +515,23 @@ export class Chr extends Unit {
 		while(++i < l) matched[i][0] && (v[++vi] = matched[i]);
 		
 		return vi === -1 ? matched : v;
+		
+	}
+	[Symbol.split](str) {
+		
+		const indices = this.index(str), l = indices.length, splitted = [];
+		
+		if (l) {
+			
+			let i, si, idx;
+			
+			i = si = -1;
+			while (++i < l) splitted[++si] = str.substring(idx?.lastIndex ?? 0, (idx = indices[i]).index);
+			splitted[++si] = str.substring(idx.lastIndex);
+			
+		} else splitted[0] = str;
+		
+		return splitted;
 		
 	}
 	
@@ -534,7 +562,7 @@ export class Term extends Array {
 	// 第一引数 str の中から、第二引数 l と第三引数 r の間にある文字列を特定し、その位置など、それに関する情報を返す。
 	// Term.prototype.locate の戻り値を任意の数だけ第四引数 masks 以降に指定すると、
 	// l ないし r の位置が masks が示す位置範囲に一致する時は、その l,r の情報を戻り値に含めない。
-	static get(str, l, r, ...masks) {
+	static get(str, l, r, isFlat, ...masks) {
 		
 		l || (l = r, r = null),
 		
@@ -545,29 +573,34 @@ export class Term extends Array {
 		
 		if (!lL) return locales;
 		
-		const	equals = r && l.equals(r), rI = equals ? lI : (r || l).mask(str, ...masks).unmasked, rL = rI.length;
+		const	same = r && l.isSameAs(r), rI = same ? lI : (r || l).mask(str, ...masks).unmasked, rL = rI.length;
 		// 最長一致にするために、rI の値を reverse() して設定するように変更したが、影響不明。
-		//const	equals = r && l.equals(r), rI = equals ? lI : (r || l).mask(str, ...masks).unmasked.reverse(), rL = rI.length;
+		//const	same = r && l.isSame(r), rI = same ? lI : (r || l).mask(str, ...masks).unmasked.reverse(), rL = rI.length;
 		
 		if (!rL) return locales;
 		
-		const rShift = equals ? 2 : 1, localedL = [];
-		let i,i0,mi,lxi, L,LI, R,RI, locale;
+		const rShift = same ? 2 : 1, localedL = !isFlat && [];
+		let i,i0,l0,mi, L,LI, R,RI, locale;
 		
-		i = mi = -1;
+		i = mi = l0 = -1;
 		while ((i += rShift) < rL) {
-			RI = (R = rI[i]).index + (r ? 0 : R[0].length);
-			i0 = lL;
-			while (--i0 > -1 && (((L = lI[i0]).index + L[0].length > RI) || localedL.indexOf(i0) !== -1));
-			if (i0 > -1) {
-				localedL[++mi] = i0,
+			
+			i0 = lL, RI = (R = rI[i]).index + (r ? 0 : R[0].length);
+			while (--i0 > l0 && (((L = lI[i0]).lastIndex > RI) || (localedL && localedL.indexOf(i0) !== -1)));
+			
+			if (i0 > l0) {
 				// *o は、一致文字列の一致開始位置、*i は一致終了位置。例えば str.substring(*.*o, *.*i) で一致部分を抜き出せる。
 				// ls は、r の左側にあるすべての l の一致情報。この関数が判定する一致は基本的に最短一致だが、
 				// このプロパティが示す情報を材料に最長一致を組むことができるかもしれない。
-				locale = locales[mi] = { l: L, lo: L.index, li: L.index + L[0].length, ls: lI.slice(0, i0 + 1), r: r ? R : R.index, ri: RI, ro: r ? RI + R[0].length : RI },
-				locale.inner = str.substring(locale.li, locale.ri),
-				locale.outer = str.substring(locale.lo, locale.ro);
+				const { lo,li, ro,ri } = locale = locales[++mi] = {
+							l: L, lo: L.index, li: L.lastIndex, ls: lI.slice(0, i0 + 1),
+							r: r ? R : R.index, ri: RI, ro: r ? RI + R[0].length : RI
+						};
+				locale.inner = str.substring(li, ri),
+				locale.outer = str.substring(lo, ro),
+				localedL ? (localedL[mi] = i0) : (l0 = i0);
 			}
+			
 		}
 		
 		return locales;
@@ -640,7 +673,9 @@ export class Term extends Array {
 		
 		super(...(hasEsc ? chrs[0] : chrs)),
 		
-		this.setDefaultEscSeq(defaultEscSeq);
+		this.setDefaultEscSeq(defaultEscSeq),
+		
+		this.isFlat = hasEsc ? chrs[2] : undefined;
 		
 	}
 	
@@ -742,7 +777,7 @@ export class Term extends Array {
 			
 			l0 = many ? 0 : -1;
 			while (--i > l0) {
-				l1 = (loc = get(str, i ? (prev = this.chr(i - 1)) : undefined, last || this.chr(i), ...masks)).length,
+				l1 = (loc = get(str, i ? (prev = this.chr(i - 1)) : undefined, last || this.chr(i), this.isFlat, ...masks)).length,
 				i0 = -1, last = prev;
 				while (++i0 < l1) locs[++ll] = loc[i0];
 			}
@@ -988,7 +1023,7 @@ export class Terms extends Array {
 				term = this[++ti] = this[typeof pd.name === 'symbol' ? pd.name : Symbol(pd.name)] =
 					(term = replacer && (replaces = pd.name in replacer) ? replacer[pd.name] : pd.term) instanceof Term ?
 						replaces && clones ? term.clone('esc' in pd ? pd.esc : esc) : term :
-							new Term(Terms.createTermValue(term, dict), 'esc' in pd ? pd.esc : esc),
+							new Term(Terms.createTermValue(term, dict), 'esc' in pd ? pd.esc : esc, pd.isFlat),
 				
 				'callback' in pd && term.setCallback(pd.callback, this),
 				
@@ -1439,6 +1474,8 @@ export class Strings {
 			subtraction: '-',
 			addition: '+',
 			
+			slash: '/',
+			
 			nai: [ 'nai', 'null' ],
 			hu: [ 'hu', 'undefined' ],
 			shin: [ 'shin', 'true' ],
@@ -1462,11 +1499,13 @@ export class Strings {
 					referenceRight: escaped.squareBracketRight,
 					nestLeft: escaped.lessThanSign,
 					nestRight: escaped.greaterThanSign,
+					regExpLeft: '/',
+					regExpRight: '/',
 					
 					assign: escaped.equalsSign,
 					mute: escaped.semicolon,
 					separator: escaped.colon,
-					disable: escaped.exclamationMark,
+					not: escaped.exclamationMark,
 					comma: escaped.comma,
 					
 					division: escaped.division,
@@ -1476,7 +1515,8 @@ export class Strings {
 					
 					number: /(-?(\d+(?:\.\d+)?|Infinity)|NaN)/g,
 					identifier: /[$A-Za-z_\u0080-\uFFFF][$\w\u0080-\uFFFF]*/g,
-					space: /[\n\s\t]+/g,
+					//space: /[\n\s\t]+/g,
+					space: '[\\n\\s\\t]',
 					
 					nai: new RegExp(`(?:${escaped.nai.join('|')})`, 'g'),
 					hu: new RegExp(`(?:${escaped.hu.join('|')})`, 'g'),
@@ -1488,7 +1528,61 @@ export class Strings {
 		dict.referenceLeft = [ dict.referenceSign, dict.bracketLeft ],
 		dict.referenceRight = dict.bracketRight,
 		
-		dict.blank = dict.space;
+		dict.blank = [ dict.space, '+' ];
+		
+		// /(?:^|[:;,\[+\-*])\s*?\/([^\/]+?)\/([dgimsuy]?)\s*?(?:[:;,\]+\-*]|$)/
+		//dict.regExpLiteralLeft = [
+		//	'(?:^|[',
+		//	dict.separator,
+		//	dict.mute,
+		//	dict.comma,
+		//	dict.bracketLeft,
+		//	dict.groupLeft,
+		//	dict.addition,
+		//	'])',
+		//	dict.space,
+		//	'*?',
+		//	dict.regExpLeft
+		//],
+		//dict.regExpLiteralRight = [
+		//	dict.regExpRight,
+		//	'([dgimsuy]?)',
+		//	dict.space,
+		//	'*?',
+		//	'(?:[',
+		//	dict.comma,
+		//	dict.bracketRight,
+		//	dict.groupRight,
+		//	dict.addition,
+		//	']|$)'
+		//];
+		dict.regExpLiteralLeft = [
+			'(?<!',
+			'(?:',
+			dict.number,
+			'|',
+			dict.identifier,
+			')',
+			dict.space,
+			'*?)',
+			dict.regExpLeft
+		],
+		dict.regExpLiteralRight = [
+			dict.regExpRight,
+			'([dgimsuy]*)',
+			'(?!',
+			dict.space,
+			'(?:',
+			dict.number,
+			'|',
+			dict.identifier,
+			'))'
+		];
+		//dict.regExpLiteralLeft = dict.regExpLeft,
+		//dict.regExpLiteralRight = [ dict.regExpRight, '([dgimsuy]?)' ];
+		
+		//dict.regExpLiteralLeft = new RegExp(`(?:^|[${regExpLeftSeparator}])${dict.space}*?${dict.regExpLeft}`, 'g'),
+		//dict.regExpLiteralRight = new RegExp(`${dict.regExpRight}([dgimsuy]?)${dict.space}*?(?:[${regExpRightSeparator}|$])`, 'g');
 		
 	}
 	
@@ -1715,7 +1809,8 @@ export class StringsParser extends ParseHelper {
 		
 		const v = new String(mask.inners[0]);
 		
-		v[StringsParser.nests] = true;
+		v[StringsParser.nests] = true,
+		v[StringsParser.maskData] = mask;
 		
 		return v;
 		
@@ -1724,7 +1819,8 @@ export class StringsParser extends ParseHelper {
 		
 		const v = new String(mask.inners[0]);
 		
-		v[StringsParser.evaluates] = true;
+		v[StringsParser.evaluates] = true,
+		v[StringsParser.maskData] = mask;
 		
 		return v;
 		
@@ -1733,7 +1829,8 @@ export class StringsParser extends ParseHelper {
 		
 		const v = new String(mask.inners[0]);
 		
-		v[StringsParser.refers] = true;
+		v[StringsParser.refers] = true,
+		v[StringsParser.maskData] = mask;
 		
 		return v;
 		
@@ -1747,12 +1844,9 @@ export class StringsParser extends ParseHelper {
 		if (!pm.length) return mask.$;
 		
 		const	{ captor, splitted } = pm[0][0],
-				{ symbol } = StringsParser,
+				{ maskData, symbol } = StringsParser,
 				s = StringsParser[symbol],
-				dict = this[Terms.dict],
-				disable = dict[s.disable];
-		
-		if (disable instanceof RegExp ? disable.test(splitted[2][0]) : splitted[2][0] === ''+disable) return '';
+				dict = this[Terms.dict];
 		
 		const	{ optionName, syntaxError } = StringsParser,
 				assign = dict[s.assign],
@@ -1775,9 +1869,10 @@ export class StringsParser extends ParseHelper {
 			
 		}
 		
-		v = { descriptor, label, options, args, source: mask.$ };
+		v = { descriptor, label, options, args, source: mask.$ }, mutes && (v = { muted: v }),
+		v[maskData] = mask;
 		
-		return mutes ? { muted: v } : v;
+		return v;
 		
 	}
 	static {
@@ -1787,6 +1882,7 @@ export class StringsParser extends ParseHelper {
 		this.nests = Symbol('StringsParser.nests'),
 		this.evaluates = Symbol('StringsParser.evaluates'),
 		this.refers = Symbol('StringsParser.refers'),
+		this.maskData = Symbol('StringsParser.maskData'),
 		
 		// esc = escape
 		this[ParseHelper.esc] = new Pattern('\\'),
@@ -1795,7 +1891,7 @@ export class StringsParser extends ParseHelper {
 		this[ParseHelper.symbolNames] = [
 			
 			'str', 'nst',
-			'ref', 'syx', 'sys', 'syl',
+			'ref', 'rex', 'syx', 'sys', 'syl',
 			're', 'evl', 'fnc', 'dom', 'amp', 'frk', 'ech', 'clc',
 			'backwards', 'every',
 			
@@ -1809,11 +1905,15 @@ export class StringsParser extends ParseHelper {
 			'evalRight',
 			'referenceLeft',
 			'referenceRight',
+			'commentLeft',
+			'commentRight',
 			'assign',
 			'mute',
 			'separator',
-			'disable',
+			'not',
 			'assignment',
+			'regExpLeft',
+			'regExpRight',
 			
 		];
 		
@@ -1830,27 +1930,34 @@ export class StringsParser extends ParseHelper {
 												[s.assign]: new Pattern('='),
 												[s.mute]: new Pattern(';'),
 												[s.separator]: new Pattern(':'),
-												[s.disable]: new Pattern('!'),
+												[s.not]: new Pattern('!'),
 												[s.referenceSign]: new Pattern('$'),
+												[s.regExpLeft]: new Pattern('/'),
+												[s.regExpRight]: new Pattern('/'),
 											};
 		
 		dict[s.referenceLeft] = [ dict[s.referenceSign], dict[s.bracketLeft] ],
 		dict[s.referenceRight] = dict[s.bracketRight],
-		dict[s.assignment] = [ '(?:', dict[s.mute], '|', dict[s.separator], '|', dict[s.disable], ')' ],
+		dict[s.assignment] = [ '(?:', dict[s.mute], '|', dict[s.separator], ')' ],
+		
+		dict[s.regExpLiteralLeft] = dict[s.regExpLeft],
+		dict[s.regExpLiteralRight] = dict[s.regExpRight],
 		
 		this[ParseHelper.precedenceDescriptors] = [
-			{ name: s.str, term: [ s.stringLeft, s.stringRight ], unmasks: true },
+			{ name: s.str, term: [ s.stringLeft, s.stringRight ], unmasks: true, isFlat: true },
 			{ name: s.ref, term: [ s.referenceLeft, s.referenceRight ], callback: StringsParser.reference },
+			{ name: s.rex, term: [ s.regExpLiteralLeft, s.regExpLiteralRight ], unmasks: true, isFlat: true },
 			{ name: s.syx, term: [ s.bracketLeft, s.bracketRight ], callback: StringsParser.parse },
 			{ name: s.nst, term: [ s.nestLeft, s.nestRight ], callback: StringsParser.nest },
 			{ name: s.evl, term: [ s.evalLeft, s.evalRight ], callback: StringsParser.evl },
 		],
 		
 		this.parameterPrecedence = [
-			{ name: s.str, term: [ s.stringLeft, s.stringRight ], esc: null, unmasks: true },
+			{ name: s.str, term: [ s.stringLeft, s.stringRight ], unmasks: true, isFlat: true },
 			{ name: s.ref, term: [ s.referenceLeft, s.referenceRight ], esc: null, unmasks: true },
 			{ name: s.nst, term: [ s.nestLeft, s.nestRight ], esc: null, unmasks: true },
 			{ name: s.evl, term: [ s.evalLeft, s.evalRight ], esc: null, unmasks: true },
+			{ name: s.rex, term: [ s.regExpLiteralLeft, s.regExpLiteralRight ], unmasks: true, isFlat: true },
 			{ name: s.syx, term: [ s.bracketLeft, s.bracketRight ], esc: null, unmasks: true },
 			{ name: s.sys, term: [ /^/g, s.assignment, /$/g ], esc: null },
 			{ name: s.syl, term: [ /^/g, s.assignment, s.separator, /$/g ], esc: null },
@@ -1869,6 +1976,8 @@ export class StringsParser extends ParseHelper {
 			{ ...StringsParser.dict, ...(dict && typeof dict === 'object' ? dict : {}) }
 		),
 		
+		this.not = new Chr(this[Terms.dict][s.not], esc),
+		
 		this.paramMask =
 			new Terms({ precedence: StringsParser.parameterPrecedence, defaultThis: this, dict: this[Terms.dict] }),
 		
@@ -1877,6 +1986,24 @@ export class StringsParser extends ParseHelper {
 	}
 	
 	[ParseHelper.before](plot, plotLength, input, detail, self) {
+		
+		const	indexedNot = this.not.index(input), l = indexedNot.length;
+		
+		if (l) {
+			
+			const notIndices = [], { maskData } = StringsParser;
+			let i,i0,p;
+			
+			i = -1;
+			while (++i < l) notIndices[i] = indexedNot[i].lastIndex;
+			
+			i = -1;
+			while (++i < plotLength)
+				(p = plot[i]) && typeof p === 'object' && maskData in p &&
+					((i0 = notIndices.indexOf(p[maskData].lo)) !== -1) &&
+						(plot[i - 1] = plot[i - 1].slice(0, -indexedNot[i0][0].length), plot.splice(i--, 1), --plotLength);
+			
+		}
 		
 		(detail.hasOwnProperty(StringsParser.assignedIndex) && Array.isArray(detail[StringsParser.assignedIndex])) ||
 			(detail[StringsParser.assignedIndex] = []);
@@ -1944,6 +2071,11 @@ export class StringsExpression extends ParseHelper {
 			StringsExpression.anonAssignKey;
 		
 		return detail && typeof detail === 'object' ? k in detail ? detail[k] : undefined : undefined;
+		
+	}
+	static regexp(mask, masks, input, detail, self) {
+		
+		return new RegExp(new Pattern(mask.inners[0]), mask.splitted[2][1]);
 		
 	}
 	
@@ -2029,6 +2161,7 @@ export class StringsExpression extends ParseHelper {
 			'evl',
 			'gi',
 			'grp',
+			'rex',
 			'hu',
 			'idt',
 			'nai',
@@ -2053,6 +2186,10 @@ export class StringsExpression extends ParseHelper {
 			'nestRight',
 			'groupLeft',
 			'groupRight',
+			'regExpLeft',
+			'regExpRight',
+			'regExpLiteralLeft',
+			'regExpLiteralRight',
 			'referenceSign',
 			'number',
 			'nai',
@@ -2066,6 +2203,7 @@ export class StringsExpression extends ParseHelper {
 			'subtraction',
 			'addition',
 			'space',
+			'blank',
 			'referenceLeft',
 			'referenceRight',
 			
@@ -2083,6 +2221,8 @@ export class StringsExpression extends ParseHelper {
 												[s.nestRight]: new Pattern('>'),
 												[s.groupLeft]: new Pattern('('),
 												[s.groupRight]: new Pattern(')'),
+												[s.regExpLeft]: new Pattern('/'),
+												[s.regExpRight]: new Pattern('/'),
 												[s.referenceSign]: new Pattern('$'),
 												[s.number]: /(-?(\d+(?:\.\d+)?|Infinity)|NaN)/g,
 												[s.nai]: /(?:nai|null)/g,
@@ -2095,11 +2235,15 @@ export class StringsExpression extends ParseHelper {
 												[s.multiplication]: new Pattern('*'),
 												[s.subtraction]: new Pattern('-'),
 												[s.addition]: new Pattern('+'),
-												[s.space]: /[\n\s\t]+/g
+												[s.space]: '[\\n\\s\\t]'
 											};
 		
+		dict[s.blank] = [ dict[s.space], '+' ],
 		dict[s.referenceLeft] = [ dict[s.referenceSign], dict[s.bracketLeft] ],
 		dict[s.referenceRight] = dict[s.bracketRight],
+		
+		dict[s.regExpLiteralLeft] = dict[s.regExpLeft],
+		dict[s.regExpLiteralRight] = dict[s.regExpRight],
 		
 		this.opsPrecedence = [
 			{ sym: s.minus, callback: StringsExpression.minus },
@@ -2116,6 +2260,7 @@ export class StringsExpression extends ParseHelper {
 			{ name: s.nst, term: [ s.nestLeft, s.nestRight ], callback: StringsExpression.nest },
 			{ name: s.grp, term: [ s.groupLeft, s.groupRight ], callback: StringsExpression.group },
 			{ name: s.ref, term: [ s.referenceLeft, s.referenceRight ], callback: StringsExpression.identify },
+			{ name: s.rex, term: [ s.regExpLiteralLeft, s.regExpLiteralRight ], isFlat: true, callback: StringsExpression.regexp },
 			{ name: s.num, term: [ s.number ], callback: StringsExpression.number },
 			{ name: s.nai, term: [ s.nai ], callback: null },
 			{ name: s.hu, term: [ s.hu ], callback: undefined },
@@ -2127,7 +2272,7 @@ export class StringsExpression extends ParseHelper {
 			{ name: s.mul, term: [ s.multiplication ], callback: s.mul },
 			{ name: s.sub, term: [ s.subtraction ], callback: s.sub },
 			{ name: s.add, term: [ s.addition ], callback: s.add },
-			{ name: s.spc, term: [ s.space ], callback: Term.deletes }
+			{ name: s.spc, term: [ s.blank ], callback: Term.deletes }
 			
 		];
 		
@@ -2140,7 +2285,16 @@ export class StringsExpression extends ParseHelper {
 			StringsExpression,
 			esc,
 			{ ...StringsExpression.dict, ...(dict && typeof dict === 'object' ? dict : {}) }
-		),
+		);
+		
+		//const regExpRight = dict[StringsExpression[ParseHelper.symbol].regExpRight];
+		//
+		//this.regExpLiteralClosure = new Chr(regExpRight?.source ?? regExpRight, esc),
+		//hi(this.regExpLiteralClosure.index('/\\//'));
+		//for test
+		//hi(this[StringsExpression[ParseHelper.symbol].rex],this[StringsExpression[ParseHelper.symbol].rex].plot('1 /a/,/b/gi,/3/,1 /b/2'));
+		//hi(this[StringsExpression[ParseHelper.symbol].rex].plot('1 /a/ ,a /b/ b,/3/,/b/2'));
+		//hi(this[StringsExpression[ParseHelper.symbol].rex].plot('/\\//'));
 		
 		this[ParseHelper.escOwners] = []
 		
@@ -2223,6 +2377,7 @@ export class StringsDescriptor {
 	
 	static {
 		
+		this.anonDescriptor = Symbol('StringsDescriptor.anonDescriptor'),
 		this.deletes = Symbol('StringsDescriptor.deletes'),
 		this.reflects = Symbol('StringsDescriptor.reflects'),
 		this.variadic = Symbol('StringsDescriptor.variadic');
@@ -2239,7 +2394,8 @@ export class StringsDescriptor {
 	
 	get(parameter, assigned, property) {
 		
-		const	descriptor = this.descriptor[parameter.descriptor || 'I'], { variadic } = StringsDescriptor;
+		const	{ anonDescriptor, variadic } = StringsDescriptor,
+				descriptor = this.descriptor[parameter.descriptor || anonDescriptor];
 		let v;
 		
 		if (Array.isArray(descriptor) && descriptor[StringsDescriptor.reflects] && typeof descriptor[0] === 'function') {
@@ -2275,30 +2431,40 @@ export class StringsDescriptor {
 	// describe にシンボル StringsDescriptor.deletes を指定すると、descriptor に指定したプロパティを削除する。
 	register(descriptor, describe, asValue) {
 		
-		if (!descriptor) return;
+		const { anonDescriptor } = StringsDescriptor;
 		
 		switch (typeof descriptor) {
 			
-			case 'string':
-			this.registerCallback(descriptor, describe, asValue);
+			case 'number':
+			descriptor += '';
+			case 'string': case 'symbol':
+			this.registerCallback(descriptor || anonDescriptor, describe, asValue);
 			break;
 			
 			case 'object':
-			if (Array.isArray(descriptor)) {
+			if (descriptor) {
 				
-				const l = descriptor.length;
-				let i;
+				if (Array.isArray(descriptor)) {
+					
+					const l = descriptor.length;
+					let i;
+					
+					i = -1;
+					while (++i < l) this.register(descriptor[i], describe, asValue);
+					
+				} else {
+					
+					let k;
+					for (k in descriptor) this.register(k, descriptor[k], asValue);
+					
+				}
 				
-				i = -1;
-				while (++i < l) this.registerCallback(descriptor[i], describe, asValue);
-				
-			} else if (descriptor) {
-				
-				let k;
-				for (k in descriptor) this.registerCallback(k, descriptor[k], asValue);
+				break;
 				
 			}
-			break;
+			
+			default:
+			this.registerCallback(descriptor ? ''+descriptor : anonDescriptor, describe, asValue);
 			
 		}
 		
@@ -2475,7 +2641,7 @@ class Inline {
 	}
 	
 }
-strings.register([ 'I' ], [ Inline.describe, Inline ]);
+strings.register([ '', 'I' ], [ Inline.describe, Inline ]);
 
 class Duplicator {
 	
@@ -2500,7 +2666,6 @@ class Duplicator {
 }
 strings.register([ '^', 'dup' ], [ Duplicator.describe, Duplicator ]);
 
-//coco 不特定多数の url への対応
 class Agent {
 	
 	static describe(urls, type, timeout, interval, dev) {
@@ -2596,37 +2761,44 @@ class Agent {
 	}
 	
 }
-strings.register([ 'agent', 'fetch' ], [ Agent.describe, Agent ]);
+strings.register([ 'dl', 'fetch' ], [ Agent.describe, Agent ]);
 
-class Selector {
+class Fetch {
 	
-	static decide(type) {
+	static determine(type, ...args) {
 		
 		switch (type) {
-			case 'selector':
-			return this.describe(...arguments);
+			case 'selector': break;
 			default:
-			return this.describe(type, arguments[1], null, null, ...[ ...arguments ].slice(2));
+			args = [ args[0], null, null, ...args.slice(1) ];
 		}
 		
+		return this.describe(type, ...args);
+		
 	}
-	static describe(type, urls, selector = ':root', propertyName = [ 'innerHTML' ], rxSrc, replacer, interval = -1, timeout = 30000) {
+	
+	static describe(type, urls, selector = ':root', propertyName = [ 'innerHTML' ], regexp, replacer = '', interval = -1, timeout = 30000) {
 		
 		const	args = [ ...arguments ],
 				{ $, each, reflections, spreads } = Composer,
 				reflectors = [ [ Agent.fetch, $, [ urls, 'text', timeout, interval ] ] ];
 		let i;
 		
-		i = 0,
-		type === 'selector' && (
-				reflectors[++i] = [ this.reflect, $, [ selector, propertyName ] ],
-				reflectors[i][each] = true,
-				reflectors[i][spreads] = true
-			),
+		i = 0;
 		
+		switch (type) {
+			case 'selector':
+			reflectors[++i] = [ this.reflect, $, [ selector, propertyName ] ],
+			reflectors[i][each] = true,
+			reflectors[i][spreads] = true;
+			break;
+			default:
+			reflectors[++i] = [ this.fetchedText, $, [] ],
+			reflectors[i][each] = true;
+		}
 		
-		typeof rxSrc === 'string' &&
-			((reflectors[++i] = [ String.prototype.replace, $, [ new RegExp(rxSrc), replacer ] ])[each] = true),
+		(typeof regexp === 'string' || regexp instanceof RegExp) &&
+			((reflectors[++i] = [ String.prototype.replace, $, [ regexp, replacer ] ])[each] = true),
 		
 		reflectors[reflections] = true;
 		
@@ -2634,10 +2806,15 @@ class Selector {
 		
 	}
 	
+	static fetchedText() {
+		
+		return this || document.documentElement.innerHTML;
+		
+	}
 	static reflect(selector, propertyName) {
 		
-		return typeof this === 'string' ?	Selector.load(this, selector, propertyName) :
-														Selector.fetch(document.querySelectorAll(selector), propertyName);
+		return typeof this === 'string' ?	Fetch.load(this, selector, propertyName) :
+														Fetch.fetch(document.querySelectorAll(selector), propertyName);
 		
 	}
 	
@@ -2659,7 +2836,7 @@ class Selector {
 								contentWindow.postMessage(
 									{
 										signature,
-										values: Selector.fetch(contentWindow.document.querySelectorAll(selector), propertyName)
+										values: Fetch.fetch(contentWindow.document.querySelectorAll(selector), propertyName)
 									},
 									location.origin
 								)
@@ -2708,13 +2885,13 @@ class Selector {
 	}
 	static {
 		
-		this.decide[StringsDescriptor.variadic] = true;
+		this.determine[StringsDescriptor.variadic] = true;
 		
 	}
 	
 }
-strings.register([ 'ft', 'fetchtext' ], [ Selector.decide, Selector, [ 'text' ] ]),
-strings.register([ '$', 'dom' ], [ Selector.decide, Selector, [ 'selector' ] ]);
+strings.register([ 'dlt', 'fetchtext' ], [ Fetch.determine, Fetch, [ 'text' ] ]),
+strings.register([ '$', 'dom' ], [ Fetch.determine, Fetch, [ 'selector' ] ]);
 
 export class Composer {
 	

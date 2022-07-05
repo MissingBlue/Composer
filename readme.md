@@ -52,7 +52,7 @@ console.log(strings("[:(8, 1 + (0 + 1)) * 2 / 4 - -1]")); // [ "2" ]
 ### リテラル
 　以下のリテラルは、評価時に対応する JavaScript のリテラルに変換されます。
 
-#### 文字列型
+#### 文字列
 　文字列は引用符 `'` で囲みます。JavaScript と違い、二重引用符 `"` は使えません。このことから、引数 *string* に指定する文字列は、`"` で囲むことが推奨されます。`'` で囲む場合は、*string* 中で文字列を囲う `'` はすべてバックスラッシュ `\` でエスケープする必要があります。
 ```javascript
 console.log(
@@ -60,12 +60,12 @@ console.log(
 	strings('[:\'いろは\']') // [ "いろは" ]
 );
 ```
-#### 数値型
+#### 数値
 　数値は十進法表記のみ対応しており、小数点や負の値、`Infinity`、`NaN` を指定することができます。
 ```javascript
 console.log(strings("[:Infinity * -0.1]")); // [ "-Infinity" ]
 ```
-#### 論理型
+#### 論理
 　true に相当する `shin`、false に相当する `gi` が使えます。`true`、`false` もエイリアスとして使えます。
 ```javascript
 console.log(
@@ -73,11 +73,20 @@ console.log(
 	strings("[:true]")  // [ "true" ]
 );
 ```
-#### null 型
+#### null
 　null に相当する `nai` が使えます。`null` もエイリアスとして使えます。
 
-#### undefined 型
+#### undefined
 　undefined に相当する `hu` が使えます。`undefined` もエイリアスとして使えます。
+
+#### 正規表現
+　JavaScript と同じように、正規表現はスラッシュ `/` で囲みます。[フラグ](https://developer.mozilla.org/ja/docs/Web/JavaScript/Guide/Regular_Expressions#advanced_searching_with_flags)を設定する場合は、正規表現を `/` で閉じた直後に任意の文字を指定します。正規表現内でスラッシュ `/` を文字として使う場合のみ、JavaScript とは異なり、二重バックスラッシュ `\\\\` でエスケープします。
+```javascript
+console.log(
+	strings("[:/abc/i]"),                                 // [ "/abc/i" ]
+	strings("[@: 'replace', 'a/B/c', /[\\/bc]/gi, 'a' ]") // [ "aaaaa" ]
+);
+```
 
 ### 識別子
 　識別子は式中に限り使うことができます。[JavaScript の識別子](https://developer.mozilla.org/ja/docs/Glossary/Identifier)に準じ、必ずアルファベットを含む文字か、記号 `$` `_` で始まり、それに続く文字列では数字を含めることができます。アルファベットの大文字小文字は区別されます。
@@ -289,9 +298,19 @@ console.log(
 )
 ```
 
+### `dl`, `fetch` ダウンロード関数
+```
+[(dl,fetch):url[, type = 'text' ]]
+```
+
+### `dlt`, `fetchtext` テキストファイルダウンロード関数
+```
+[(dlt,fetchtext):url[, replaced ][, replacer = '' ]]
+```
+
 ### `$`, `dom` セレクター関数
 ```
-[($,dom):url, selector[, propertyName = 'innerHTML' ]]
+[($,dom):url, selector[, propertyName = 'innerHTML' ][, replaced ][, replacer = '' ]]
 ```
 　第一引数 *url* に指定した値が示す HTML 文書から、第二引数 *selector* が示す [CSS セレクター](https://developer.mozilla.org/ja/docs/Web/CSS/CSS_Selectors) に一致する要素をすべて取得し、それらの要素の、第三引数 *propertyName* に指定した属性ないしプロパティの値を取得します。*url* が URL を示す値であれば、これらの処理は非同期通信で行なわれます。URL は、[CORS](https://developer.mozilla.org/ja/docs/Glossary/CORS) が可能でない限り、[同一オリジン](https://developer.mozilla.org/ja/docs/Web/Security/Same-origin_policy)である必要があります。またこの時 `strings` が返す値も Promise になります。この Promise は、一連の処理を終えたあとに、`strings` の本来の戻り値で解決されます。*url* が [Falsy](https://developer.mozilla.org/ja/docs/Glossary/Falsy) の場合、上記の処理は `strings` の実行元となるドキュメントに対して同期処理で行なわれます。この時、`strings` の戻り値は、通常通り、生成された文字列を列挙する Array になります。
 
@@ -300,6 +319,8 @@ console.log(
 　また、それよりも重要かつ重大な点として、上記のように、取得した文書はスクリプトの実行元で展開されるため、文書に相対パスが含まれる場合、その相対パスが正しく解決されなくなります。取得した文書が、実行元と同一パス上にあるか、あるいはその相対パスが偶然実行元からも解決できる場合を除けば、取得した文書内からの相対パスによるリソースの取得は失敗に終わるでしょう。この問題は、取得した文書が、外部の JavaScript などを通じて動的に情報を読み込む場合に深刻化します。相対パスによって読み込まれる外部のスクリプトが動作せず、セレクターが示す要素がページ上に現われないと言うケースが考えられます。それでなくても、ウェブページとの対話によって得られる情報は、この関数からは一切取得できません。
 
 　機能だけを見れば、外部の情報のスクレイピングに使うことしか考えられない関数ですが、実際には、同一オリジン内の、外部のリソースに依存しない静的な HTML 文書内の情報の取得と言う、現代のウェブにおけるニッチな状況でしかこの関数が正常に機能することはありません。
+
+　第四引数 *replaced* と第五引数 *replacer* を指定すると、取得した情報に文字列置換処理を行うことができます。この処理は `String.prototype.replace` を通じて行われるため、*replaced* には[正規表現リテラル](#正規表現)を指定することができます。同様に、*replacer* 内に[置換パターン](https://developer.mozilla.org/ja/docs/Web/JavaScript/Reference/Global_Objects/String/replace#%E5%BC%95%E6%95%B0%E3%81%A8%E3%81%97%E3%81%A6%E3%81%AE%E6%96%87%E5%AD%97%E5%88%97%E3%81%AE%E6%8C%87%E5%AE%9A)を指定できます。
 
 <!--# 0 と 1 の 8 次元座標
 ```javascript
